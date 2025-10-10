@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\FoMed_WebAPI.props" />
+</Project>

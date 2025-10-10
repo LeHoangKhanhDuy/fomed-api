@@ -1,0 +1,28 @@
+﻿<Project>
+  <ItemGroup>
+    <StaticWebAssetEndpoint Include="_content/FoMed_WebAPI/swagger-ui/fomedLogo.png">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\swagger-ui\fomedLogo.png'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"integrity","Value":"sha256-HzXgrAnpQ5RZK5q30BX5YkNjJqBtpFCPNN8r3aA5NFw="}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Accept-Ranges","Value":"bytes"},{"Name":"Cache-Control","Value":"max-age=3600, must-revalidate"},{"Name":"Content-Length","Value":"29163"},{"Name":"Content-Type","Value":"image/png"},{"Name":"ETag","Value":"\u0022HzXgrAnpQ5RZK5q30BX5YkNjJqBtpFCPNN8r3aA5NFw=\u0022"},{"Name":"Last-Modified","Value":"Tue, 12 Aug 2025 06:30:51 GMT"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+    <StaticWebAssetEndpoint Include="_content/FoMed_WebAPI/swagger-ui/fomedLogo.rp4dwr7kxr.png">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\swagger-ui\fomedLogo.png'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"fingerprint","Value":"rp4dwr7kxr"},{"Name":"integrity","Value":"sha256-HzXgrAnpQ5RZK5q30BX5YkNjJqBtpFCPNN8r3aA5NFw="},{"Name":"label","Value":"_content/FoMed_WebAPI/swagger-ui/fomedLogo.png"}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Accept-Ranges","Value":"bytes"},{"Name":"Cache-Control","Value":"max-age=31536000, immutable"},{"Name":"Content-Length","Value":"29163"},{"Name":"Content-Type","Value":"image/png"},{"Name":"ETag","Value":"\u0022HzXgrAnpQ5RZK5q30BX5YkNjJqBtpFCPNN8r3aA5NFw=\u0022"},{"Name":"Last-Modified","Value":"Tue, 12 Aug 2025 06:30:51 GMT"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+    <StaticWebAssetEndpoint Include="_content/FoMed_WebAPI/uploads/avatars/1_741336e56a5b43c59e1a2e7e1023421e.dw9z6omagz.jpg">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\uploads\avatars\1_741336e56a5b43c59e1a2e7e1023421e.jpg'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"fingerprint","Value":"dw9z6omagz"},{"Name":"integrity","Value":"sha256-3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0="},{"Name":"label","Value":"_content/FoMed_WebAPI/uploads/avatars/1_741336e56a5b43c59e1a2e7e1023421e.jpg"}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Accept-Ranges","Value":"bytes"},{"Name":"Cache-Control","Value":"max-age=31536000, immutable"},{"Name":"Content-Length","Value":"49533"},{"Name":"Content-Type","Value":"image/jpeg"},{"Name":"ETag","Value":"\u00223SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0=\u0022"},{"Name":"Last-Modified","Value":"Tue, 30 Sep 2025 09:17:54 GMT"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+    <StaticWebAssetEndpoint Include="_content/FoMed_WebAPI/uploads/avatars/1_741336e56a5b43c59e1a2e7e1023421e.jpg">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\uploads\avatars\1_741336e56a5b43c59e1a2e7e1023421e.jpg'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"integrity","Value":"sha256-3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0="}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Accept-Ranges","Value":"bytes"},{"Name":"Cache-Control","Value":"max-age=3600, must-revalidate"},{"Name":"Content-Length","Value":"49533"},{"Name":"Content-Type","Value":"image/jpeg"},{"Name":"ETag","Value":"\u00223SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0=\u0022"},{"Name":"Last-Modified","Value":"Tue, 30 Sep 2025 09:17:54 GMT"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+  </ItemGroup>
+</Project>
