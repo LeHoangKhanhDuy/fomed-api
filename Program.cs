@@ -1,38 +1,91 @@
-using Microsoft.OpenApi.Models;
-using Microsoft.EntityFrameworkCore;
-using FoMed.Api.Models;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
-using System.Text;
-using FoMed.Api.Auth;
-using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using FoMed.Api.Auth;
+using FoMed.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ===== EF Core =====
-var connectionString =
-    "Server=localhost;Database=FoMed_Managerment;User Id=sa;Password=khanhduy23112002;Encrypt=True;TrustServerCertificate=True";
-builder.Services.AddDbContext<FoMedContext>(options =>
-    options.UseSqlServer(connectionString)
+// ========= 1) CONFIG =========
+var cfg = builder.Configuration;
+
+// Connection string
+var cs = cfg.GetConnectionString("Default")
+         ?? throw new InvalidOperationException("Missing ConnectionStrings:Default");
+
+// Allowed origins
+var allowedOrigins = cfg.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+
+// JWT config
+var jwtIssuer = cfg["Jwt:Issuer"] ?? throw new InvalidOperationException("Missing Jwt:Issuer");
+var jwtAudience = cfg["Jwt:Audience"] ?? throw new InvalidOperationException("Missing Jwt:Audience");
+var jwtKeyB64 = cfg["Jwt:Key"] ?? throw new InvalidOperationException("Missing Jwt:Key");
+
+// Decode Base64 → bytes, yêu cầu >= 32 bytes (256-bit) cho HS256
+byte[] jwtKeyBytes;
+try
+{
+    jwtKeyBytes = Convert.FromBase64String(jwtKeyB64);
+}
+catch (FormatException)
+{
+    throw new InvalidOperationException(
+        "Jwt:Key must be BASE64. Hãy tạo khóa 32 bytes và lưu ở dạng Base64.");
+}
+if (jwtKeyBytes.Length < 32)
+    throw new InvalidOperationException("Jwt:Key quá ngắn. Cần tối thiểu 32 bytes (256-bit).");
+
+// ========= 2) SERVICES =========
+
+// EF Core + retry
+builder.Services.AddDbContext<FoMedContext>(opt =>
+    opt.UseSqlServer(cs, sql =>
+        sql.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorNumbersToAdd: null
+        )
+    )
 );
 
-// ===== Controllers (gộp 1 lần) + JSON converters =====
+// Controllers + JSON converters
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
-        // format ngày dd/MM/yyyy
         o.JsonSerializerOptions.Converters.Add(new JsonDateOnlyConverter("dd/MM/yyyy"));
         o.JsonSerializerOptions.Converters.Add(new JsonDateTimeConverter("dd/MM/yyyy"));
-
-        // Enum hiển thị chuỗi (waiting/booked/...) thay vì số
         o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+        o.JsonSerializerOptions.PropertyNamingPolicy = null; // giữ tên property như model
     });
 
-// ===== Swagger =====
+// CORS
+const string CorsPolicy = "AllowFE";
+builder.Services.AddCors(opt =>
+{
+    opt.AddPolicy(CorsPolicy, p =>
+    {
+        if (allowedOrigins.Length == 0)
+        {
+            // Không cấu hình -> mở tạm toàn bộ (không dùng cookie)
+            p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        }
+        else
+        {
+            p.WithOrigins(allowedOrigins)
+             .AllowAnyHeader()
+             .AllowAnyMethod();
+            // Nếu dùng cookie: thêm .AllowCredentials() và KHÔNG được AllowAnyOrigin
+        }
+    });
+});
+
+// Swagger + Bearer
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -40,7 +93,7 @@ builder.Services.AddSwaggerGen(c =>
     c.EnableAnnotations();
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "Nhập **access token** (KHÔNG kèm chữ Bearer).",
+        Description = "Nhập access token (KHÔNG kèm chữ 'Bearer ').",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
@@ -54,78 +107,70 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ===== AuthN/AuthZ =====
+// AuthN/AuthZ (JWT)
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
-        o.TokenValidationParameters = new()
+        o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
-            ),
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(jwtKeyBytes),
             NameClaimType = ClaimTypes.NameIdentifier,
             RoleClaimType = ClaimTypes.Role
         };
 
-        // === Viết body cho 401/403 ===
         o.Events = new JwtBearerEvents
         {
-            OnTokenValidated = context =>
+            OnTokenValidated = ctx =>
             {
-                var id = (ClaimsIdentity)context.Principal!.Identity!;
+                // gom các claim "role"/"roles" về ClaimTypes.Role
+                var id = (ClaimsIdentity)ctx.Principal!.Identity!;
                 var extraRoles = id.FindAll("role").Concat(id.FindAll("roles"))
-                           .Select(r => r.Value).Distinct().ToList();
+                                   .Select(r => r.Value).Distinct();
                 foreach (var r in extraRoles)
                     id.AddClaim(new Claim(ClaimTypes.Role, r));
                 return Task.CompletedTask;
             },
-            OnChallenge = context =>
+            OnChallenge = ctx =>
             {
-                context.HandleResponse();
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json; charset=utf-8";
-                var payload = JsonSerializer.Serialize(new
+                ctx.HandleResponse();
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                ctx.Response.ContentType = "application/json; charset=utf-8";
+                return ctx.Response.WriteAsJsonAsync(new
                 {
                     success = false,
                     message = "Bạn chưa đăng nhập hoặc token không hợp lệ."
                 });
-                return context.Response.WriteAsync(payload);
             },
-            OnForbidden = context =>
+            OnForbidden = ctx =>
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "application/json; charset=utf-8";
-                var payload = JsonSerializer.Serialize(new
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                ctx.Response.ContentType = "application/json; charset=utf-8";
+                return ctx.Response.WriteAsJsonAsync(new
                 {
                     success = false,
                     message = "Bạn không có quyền truy cập."
                 });
-                return context.Response.WriteAsync(payload);
             }
         };
     });
 
 builder.Services.AddAuthorization();
 
-// Trả lỗi model-state ngắn gọn
-builder.Services.Configure<ApiBehaviorOptions>(options =>
+// ModelState gọn
+builder.Services.Configure<ApiBehaviorOptions>(opt =>
 {
-    options.InvalidModelStateResponseFactory = context =>
+    opt.InvalidModelStateResponseFactory = ctx =>
     {
-        var errors = context.ModelState
+        var errors = ctx.ModelState
             .Where(x => x.Value?.Errors.Count > 0)
-            .ToDictionary(
-                kvp => kvp.Key,
-                kvp => kvp.Value!.Errors.Select(e => e.ErrorMessage).ToArray()
-            );
-
+            .ToDictionary(k => k.Key, v => v.Value!.Errors.Select(e => e.ErrorMessage));
         return new BadRequestObjectResult(new { errors });
     };
 });
@@ -134,7 +179,20 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 
 var app = builder.Build();
 
-app.UseHttpsRedirection();
+// ========= 3) PIPELINE =========
+
+// Chuẩn hóa header forward khi chạy sau ALB/API Gateway/Nginx
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                       ForwardedHeaders.XForwardedProto |
+                       ForwardedHeaders.XForwardedHost,
+    RequireHeaderSymmetry = false
+});
+
+// Local có thể bật HTTPS redirect nếu muốn
+// if (app.Environment.IsDevelopment()) app.UseHttpsRedirection();
+
 app.UseStaticFiles();
 
 app.UseSwagger();
@@ -144,8 +202,15 @@ app.UseSwaggerUI(c =>
     c.DocumentTitle = "FoMed API Documentation";
 });
 
+app.UseCors(CorsPolicy);
+
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Health
+app.MapGet("/health", () => Results.Ok(new { ok = true, time = DateTime.UtcNow }))
+   .AllowAnonymous();
+
 app.MapControllers();
+
 app.Run();

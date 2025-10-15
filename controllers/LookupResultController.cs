@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using FoMed.Api.Models;
 using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 
 [ApiController]
 [Route("api/v1/lookup-result")]
@@ -27,10 +29,27 @@ public sealed class LookupResultController : ControllerBase
 
     public sealed class LookupByPhoneRequest
     {
+        [Required(ErrorMessage = "Vui lòng nhập số điện thoại.")]
+        [MaxLength(30, ErrorMessage = "Số điện thoại quá dài.")]
         public string Phone { get; set; } = string.Empty;
-        public DateTime? Dob { get; set; }      // yyyy-MM-dd từ FE
-        public int Page { get; set; } = 1;
-        public int Limit { get; set; } = 20;
+
+        // Optional; nếu null sẽ mặc định 1, 10
+        public int? Page { get; set; }
+        public int? Limit { get; set; }
+    }
+
+    private static string NormalizePhone(string phone)
+    {
+        // Lấy số, đổi +84xxxx -> 0xxxx
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        if (digits.StartsWith("84") && digits.Length >= 10) digits = "0" + digits[2..];
+        return digits;
+    }
+
+    private static bool IsValidVnMobile(string normalized)
+    {
+        // 0 + (3/5/7/8/9) + 8 số = 10 số
+        return Regex.IsMatch(normalized, @"^0(3|5|7|8|9)\d{8}$");
     }
 
 
@@ -98,37 +117,40 @@ public sealed class LookupResultController : ControllerBase
         if (dto == null)
             return NotFound(new { success = false, message = "Không tìm thấy hồ sơ." });
 
-        return Ok(new { success = true, message = "OK", data = dto });
+        return Ok(new { success = true, message = "Lấy hồ sơ thành công", data = dto });
     }
 
     // ============ 2) Tra cứu theo SỐ ĐIỆN THOẠI (+ DOB) ============
     [HttpPost("by-phone")]
-    [SwaggerOperation(Summary = "Tra cứu danh sách hồ sơ theo số điện thoại",
-        Description = "Nhập phone + ngày sinh (để xác thực nhẹ). Trả danh sách HSFM.*")]
+    [SwaggerOperation(
+    Summary = "Tra cứu danh sách hồ sơ theo số điện thoại",
+    Description = "Nhập số điện thoại. Page + Limit để mặc định"
+)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> LookupByPhone([FromBody] LookupByPhoneRequest req, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(req.Phone))
-            return BadRequest(new { success = false, message = "Vui lòng nhập số điện thoại." });
+        if (!ModelState.IsValid)
+            return BadRequest(new { success = false, message = "Dữ liệu không hợp lệ." });
 
-        var phone = req.Phone.Trim();
+        // Chuẩn hóa + validate phone
+        var phone = NormalizePhone(req.Phone);
+        if (!IsValidVnMobile(phone))
+            return BadRequest(new { success = false, message = "Số điện thoại không đúng định dạng Việt Nam." });
 
-        // Xác định bệnh nhân theo phone (+ Dob nếu có)
-        var patientQ = _db.Patients.AsNoTracking().Where(p => p.IsActive && p.Phone == phone);
-        if (req.Dob.HasValue)
-        {
-            var from = req.Dob.Value.Date;
-            var to = from.AddDays(1);
-            patientQ = patientQ.Where(p =>
-                p.DateOfBirth.HasValue &&
-                p.DateOfBirth.Value >= from && p.DateOfBirth.Value < to);
-        }
+        // Tìm bệnh nhân theo phone
+        var patientId = await _db.Patients.AsNoTracking()
+            .Where(p => p.IsActive && p.Phone == phone)
+            .Select(p => (long?)p.PatientId)
+            .FirstOrDefaultAsync(ct);
 
-        var patientId = await patientQ.Select(p => (long?)p.PatientId).FirstOrDefaultAsync(ct);
         if (patientId is null)
             return NotFound(new { success = false, message = "Không tìm thấy bệnh nhân phù hợp." });
 
-        var page = Math.Max(1, req.Page);
-        var limit = Math.Clamp(req.Limit, 1, 200);
+        // Phân trang: mặc định 1,10 nếu không gửi
+        var page = (req.Page ?? 1) <= 0 ? 1 : req.Page!.Value;
+        var limit = req.Limit is null ? 10 : Math.Clamp(req.Limit.Value, 1, 200);
 
         var q = _db.Encounters.AsNoTracking()
             .Where(e => e.PatientId == patientId.Value);
@@ -142,7 +164,7 @@ public sealed class LookupResultController : ControllerBase
             {
                 Code = e.Code ?? ("HSFM-" + e.EncounterId),
                 VisitAt = e.CreatedAt,
-                DoctorName = e.Doctor.FullName,
+                DoctorName = e.Doctor != null ? e.Doctor.FullName : "—",
                 ServiceName = e.Service != null ? e.Service.Name : null,
                 Status = e.Status
             })
@@ -151,7 +173,7 @@ public sealed class LookupResultController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = "OK",
+            message = "Lấy hồ sơ thành công",
             data = new
             {
                 page,

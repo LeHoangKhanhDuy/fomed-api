@@ -1,6 +1,6 @@
 {
   "Version": 1,
-  "Hash": "A3XpWjx8qzdZzEI+rbd9BB66fgYjC8M1s0zaWLz0H+U=",
+  "Hash": "S8KMUi9j80abqIhstIJsYGmQzlJhr2CYaHvnBN5ms4o=",
   "Source": "FoMed_WebAPI",
   "BasePath": "_content/FoMed_WebAPI",
   "Mode": "Default",
@@ -83,7 +83,7 @@
         },
         {
           "Name": "Last-Modified",
-          "Value": "Tue, 12 Aug 2025 06:30:51 GMT"
+          "Value": "Fri, 10 Oct 2025 02:47:24 GMT"
         },
         {
           "Name": "Cache-Control",
@@ -120,7 +120,7 @@
         },
         {
           "Name": "Last-Modified",
-          "Value": "Tue, 12 Aug 2025 06:30:51 GMT"
+          "Value": "Fri, 10 Oct 2025 02:47:24 GMT"
         },
         {
           "Name": "Cache-Control",
@@ -165,7 +165,7 @@
         },
         {
           "Name": "Last-Modified",
-          "Value": "Tue, 30 Sep 2025 09:17:54 GMT"
+          "Value": "Fri, 10 Oct 2025 02:47:24 GMT"
         },
         {
           "Name": "Cache-Control",
@@ -210,7 +210,7 @@
         },
         {
           "Name": "Last-Modified",
-          "Value": "Tue, 30 Sep 2025 09:17:54 GMT"
+          "Value": "Fri, 10 Oct 2025 02:47:24 GMT"
         },
         {
           "Name": "Cache-Control",
