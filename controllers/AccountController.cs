@@ -467,8 +467,7 @@ public class AccountsController : ControllerBase
             ValidateIssuerSigningKey = true,
             ValidIssuer = _cfg["Jwt:Issuer"],
             ValidAudience = _cfg["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                System.Text.Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
             ClockSkew = TimeSpan.Zero
         };
 
@@ -490,25 +489,22 @@ public class AccountsController : ControllerBase
 
         var data = await _db.Users
             .AsNoTracking()
+            .Include(u => u.Profile) // để lấy avatar/address/bio
             .Where(u => u.UserId == userId && u.IsActive)
-            .Select(u => new AccountProfileDto
+            .Select(u => new
             {
-                Id = u.UserId,
-                Name = u.FullName,
-                Email = u.Email,
-                Phone = u.Phone,
-                // Gender là char?
-                Gender = u.Gender == null ? null : (u.Gender == 'M' ? "Male" : "Female"),
-                // DateOnly? -> DateTime?
-                DateOfBirth = u.DateOfBirth.HasValue
-                    ? u.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
-                    : null,
-                AvatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
-                Address = u.Profile != null ? u.Profile.Address : null,
-                Bio = u.Profile != null ? u.Profile.Bio : null,
-                ProfileUpdatedAt = u.Profile != null ? u.Profile.UpdatedAt : null
-            })
-            .FirstOrDefaultAsync();
+                id = u.UserId,
+                name = u.FullName,
+                email = u.Email,
+                phone = u.Phone,
+                gender = u.Gender == null ? null : (u.Gender == 'M' ? "Male" : "Female"),
+                dateOfBirth = u.DateOfBirth.HasValue ? u.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null,
+                createdAt = u.CreatedAt,             
+                avatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
+                address = u.Profile != null ? u.Profile.Address : null,
+                bio = u.Profile != null ? u.Profile.Bio : null,
+                profileUpdatedAt = u.Profile != null ? u.Profile.UpdatedAt : null
+        }).FirstOrDefaultAsync();
 
         if (data == null)
             return NotFound(new { error = "Không tìm thấy người dùng" });

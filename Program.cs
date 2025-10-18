@@ -10,16 +10,15 @@ using Microsoft.OpenApi.Models;
 using FoMed.Api.Auth;
 using FoMed.Api.Models;
 
+// ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
-
-// ========= 1) CONFIG =========
 var cfg = builder.Configuration;
 
-// Connection string
+// DB connection
 var cs = cfg.GetConnectionString("Default")
          ?? throw new InvalidOperationException("Missing ConnectionStrings:Default");
 
-// Allowed origins
+// CORS allowed origins (cho policy dùng credentials)
 var allowedOrigins = cfg.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 
 // JWT config
@@ -27,61 +26,51 @@ var jwtIssuer = cfg["Jwt:Issuer"] ?? throw new InvalidOperationException("Missin
 var jwtAudience = cfg["Jwt:Audience"] ?? throw new InvalidOperationException("Missing Jwt:Audience");
 var jwtKeyB64 = cfg["Jwt:Key"] ?? throw new InvalidOperationException("Missing Jwt:Key");
 
-// Decode Base64 → bytes, yêu cầu >= 32 bytes (256-bit) cho HS256
+// Decode Base64 key (>= 32 bytes)
 byte[] jwtKeyBytes;
-try
-{
-    jwtKeyBytes = Convert.FromBase64String(jwtKeyB64);
-}
-catch (FormatException)
-{
-    throw new InvalidOperationException(
-        "Jwt:Key must be BASE64. Hãy tạo khóa 32 bytes và lưu ở dạng Base64.");
-}
+try { jwtKeyBytes = Convert.FromBase64String(jwtKeyB64); }
+catch { throw new InvalidOperationException("Jwt:Key must be BASE64 (256-bit+)."); }
 if (jwtKeyBytes.Length < 32)
-    throw new InvalidOperationException("Jwt:Key quá ngắn. Cần tối thiểu 32 bytes (256-bit).");
+    throw new InvalidOperationException("Jwt:Key too short. Need >= 32 bytes (256-bit).");
 
-// ========= 2) SERVICES =========
+// ================== 2) SERVICES ==================
 
 // EF Core + retry
 builder.Services.AddDbContext<FoMedContext>(opt =>
     opt.UseSqlServer(cs, sql =>
-        sql.EnableRetryOnFailure(
-            maxRetryCount: 5,
-            maxRetryDelay: TimeSpan.FromSeconds(10),
-            errorNumbersToAdd: null
-        )
-    )
-);
+        sql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
 
-// Controllers + JSON converters
+// Controllers + JSON options
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
         o.JsonSerializerOptions.Converters.Add(new JsonDateOnlyConverter("dd/MM/yyyy"));
         o.JsonSerializerOptions.Converters.Add(new JsonDateTimeConverter("dd/MM/yyyy"));
         o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
-        o.JsonSerializerOptions.PropertyNamingPolicy = null; // giữ tên property như model
+        o.JsonSerializerOptions.PropertyNamingPolicy = null; // giữ casing model
     });
 
-// CORS
-const string CorsPolicy = "AllowFE";
-builder.Services.AddCors(opt =>
+// ------------- CORS (2 policy) -------------
+const string PublicApi = "PublicApi";
+const string AuthWithCreds = "AuthWithCreds";
+
+builder.Services.AddCors(o =>
 {
-    opt.AddPolicy(CorsPolicy, p =>
+    // Policy mặc định: không credentials (phù hợp mọi API thường ngày, Bearer header)
+    o.AddPolicy(PublicApi, p => p
+        .AllowAnyOrigin()
+        .AllowAnyHeader()
+        .AllowAnyMethod());
+
+    // Policy cho route cần cookie/credentials (ví dụ refresh)
+    o.AddPolicy(AuthWithCreds, p =>
     {
         if (allowedOrigins.Length == 0)
-        {
-            // Không cấu hình -> mở tạm toàn bộ (không dùng cookie)
-            p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-        }
-        else
-        {
-            p.WithOrigins(allowedOrigins)
-             .AllowAnyHeader()
-             .AllowAnyMethod();
-            // Nếu dùng cookie: thêm .AllowCredentials() và KHÔNG được AllowAnyOrigin
-        }
+            throw new InvalidOperationException("Cors:AllowedOrigins is required for AuthWithCreds.");
+        p.WithOrigins(allowedOrigins)
+         .AllowAnyHeader()
+         .AllowAnyMethod()
+         .AllowCredentials();
     });
 });
 
@@ -91,6 +80,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "FoMed API", Version = "v1" });
     c.EnableAnnotations();
+
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "Nhập access token (KHÔNG kèm chữ 'Bearer ').",
@@ -107,7 +97,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// AuthN/AuthZ (JWT)
+// JWT Auth
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -129,10 +119,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         {
             OnTokenValidated = ctx =>
             {
-                // gom các claim "role"/"roles" về ClaimTypes.Role
+                // gom claim "role"/"roles" → ClaimTypes.Role
                 var id = (ClaimsIdentity)ctx.Principal!.Identity!;
-                var extraRoles = id.FindAll("role").Concat(id.FindAll("roles"))
-                                   .Select(r => r.Value).Distinct();
+                var extraRoles = id.FindAll("role").Concat(id.FindAll("roles")).Select(r => r.Value).Distinct();
                 foreach (var r in extraRoles)
                     id.AddClaim(new Claim(ClaimTypes.Role, r));
                 return Task.CompletedTask;
@@ -142,21 +131,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 ctx.HandleResponse();
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 ctx.Response.ContentType = "application/json; charset=utf-8";
-                return ctx.Response.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Bạn chưa đăng nhập hoặc token không hợp lệ."
-                });
+                return ctx.Response.WriteAsJsonAsync(new { success = false, message = "Bạn chưa đăng nhập hoặc token không hợp lệ." });
             },
             OnForbidden = ctx =>
             {
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 ctx.Response.ContentType = "application/json; charset=utf-8";
-                return ctx.Response.WriteAsJsonAsync(new
-                {
-                    success = false,
-                    message = "Bạn không có quyền truy cập."
-                });
+                return ctx.Response.WriteAsJsonAsync(new { success = false, message = "Bạn không có quyền truy cập." });
             }
         };
     });
@@ -175,13 +156,13 @@ builder.Services.Configure<ApiBehaviorOptions>(opt =>
     };
 });
 
+// DI cho token service của bạn
 builder.Services.AddScoped<ITokenService, TokenService>();
 
+// ================== 3) BUILD & PIPELINE ==================
 var app = builder.Build();
 
-// ========= 3) PIPELINE =========
-
-// Chuẩn hóa header forward khi chạy sau ALB/API Gateway/Nginx
+// Forwarded headers (deploy sau LB / proxy)
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor |
@@ -189,9 +170,6 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
                        ForwardedHeaders.XForwardedHost,
     RequireHeaderSymmetry = false
 });
-
-// Local có thể bật HTTPS redirect nếu muốn
-// if (app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 
@@ -202,7 +180,8 @@ app.UseSwaggerUI(c =>
     c.DocumentTitle = "FoMed API Documentation";
 });
 
-app.UseCors(CorsPolicy);
+// CORS mặc định: PublicApi (không credentials)
+app.UseCors(PublicApi);
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -211,6 +190,26 @@ app.UseAuthorization();
 app.MapGet("/health", () => Results.Ok(new { ok = true, time = DateTime.UtcNow }))
    .AllowAnonymous();
 
+// ================== 4) ROUTES ==================
+// Refresh token (ví dụ dùng cookie httpOnly + credentials)
+app.MapPost("/api/v1/auth/refresh", async (HttpContext http, ITokenService tokenSvc) =>
+{
+    // Ví dụ đọc cookie refresh
+    var refresh = http.Request.Cookies["refresh_token"];
+    if (string.IsNullOrEmpty(refresh))
+        return Results.Unauthorized();
+
+    // TODO: validate + rotate + tạo access token mới
+    // var jwt = await tokenSvc.RefreshAsync(refresh);
+    // return Results.Ok(new { token = jwt.AccessToken, expires_in = jwt.ExpiresIn });
+
+    // Stub để chạy được ngay
+    return Results.Ok(new { token = "placeholder", expires_in = 900 });
+})
+.RequireCors(AuthWithCreds)   // route này cần credentials
+.AllowAnonymous();
+
+// Controllers
 app.MapControllers();
 
 app.Run();
