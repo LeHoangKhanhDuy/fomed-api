@@ -9,6 +9,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using FoMed.Api.Auth;
 using FoMed.Api.Models;
+using System.Text;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -76,71 +77,66 @@ builder.Services.AddCors(o =>
 
 // Swagger + Bearer
 builder.Services.AddEndpointsApiExplorer();
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "FoMed API", Version = "v1" });
     c.EnableAnnotations();
-
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    var jwtScheme = new OpenApiSecurityScheme
     {
-        Description = "Nhập access token (KHÔNG kèm chữ 'Bearer ').",
+        Scheme = "bearer",
+        BearerFormat = "JWT",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement {
-        { new OpenApiSecurityScheme {
-            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
-          Array.Empty<string>() }
-    });
+        Description = "Paste **only** the token (no 'Bearer ' prefix).",
+        Reference = new OpenApiReference
+        {
+            Type = ReferenceType.SecurityScheme,
+            Id = JwtBearerDefaults.AuthenticationScheme
+        }
+    };
+
+    c.AddSecurityDefinition(jwtScheme.Reference.Id, jwtScheme);
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement { { jwtScheme, Array.Empty<string>() } });
 });
 
 // JWT Auth
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(o =>
-    {
-        o.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(jwtKeyBytes),
-            NameClaimType = ClaimTypes.NameIdentifier,
-            RoleClaimType = ClaimTypes.Role
-        };
+builder.Services
+  .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+  .AddJwtBearer(options =>
+  {
+      options.TokenValidationParameters = new TokenValidationParameters
+      {
+          ValidateIssuer = true,
+          ValidateAudience = true,
+          ValidateIssuerSigningKey = true,
+          ValidateLifetime = true,
+          ValidIssuer = builder.Configuration["Jwt:Issuer"],
+          ValidAudience = builder.Configuration["Jwt:Audience"],
+          IssuerSigningKey = new SymmetricSecurityKey(
+              Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+          ClockSkew = TimeSpan.FromMinutes(2)
+      };
 
-        o.Events = new JwtBearerEvents
-        {
-            OnTokenValidated = ctx =>
-            {
-                // gom claim "role"/"roles" → ClaimTypes.Role
-                var id = (ClaimsIdentity)ctx.Principal!.Identity!;
-                var extraRoles = id.FindAll("role").Concat(id.FindAll("roles")).Select(r => r.Value).Distinct();
-                foreach (var r in extraRoles)
-                    id.AddClaim(new Claim(ClaimTypes.Role, r));
-                return Task.CompletedTask;
-            },
-            OnChallenge = ctx =>
-            {
-                ctx.HandleResponse();
-                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                ctx.Response.ContentType = "application/json; charset=utf-8";
-                return ctx.Response.WriteAsJsonAsync(new { success = false, message = "Bạn chưa đăng nhập hoặc token không hợp lệ." });
-            },
-            OnForbidden = ctx =>
-            {
-                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                ctx.Response.ContentType = "application/json; charset=utf-8";
-                return ctx.Response.WriteAsJsonAsync(new { success = false, message = "Bạn không có quyền truy cập." });
-            }
-        };
-    });
+      options.Events = new JwtBearerEvents
+      {
+          OnAuthenticationFailed = ctx =>
+          {
+              Console.WriteLine("JWT failed: " + ctx.Exception?.Message);
+              return Task.CompletedTask;
+          },
+          OnChallenge = ctx =>
+          {
+              // giúp thấy lỗi rõ ràng hơn trong log
+              Console.WriteLine("JWT challenge: " + ctx.ErrorDescription);
+              return Task.CompletedTask;
+          }
+      };
+  });
+
 
 builder.Services.AddAuthorization();
 
@@ -179,6 +175,8 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "FoMed API v1");
     c.DocumentTitle = "FoMed API Documentation";
 });
+
+app.UseRouting();
 
 // CORS mặc định: PublicApi (không credentials)
 app.UseCors(PublicApi);

@@ -456,40 +456,52 @@ public class AccountsController : ControllerBase
     Tags = new[] { "Accounts" })]
     public async Task<IActionResult> GetProfile([FromBody] ProfileByTokenRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.Token))
-            return BadRequest(new { error = "Bắt buộc phải có user token" });
+        // 1) Lấy token: ưu tiên Authorization header, fallback body
+        string? token = null;
 
-        // Build TokenValidationParameters giống cấu hình JWT của bạn
+        var authHeader = Request.Headers.Authorization.ToString();
+        if (!string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            token = authHeader.Substring("Bearer ".Length).Trim();
+
+        if (string.IsNullOrWhiteSpace(token))
+            token = req.Token;
+
+        if (string.IsNullOrWhiteSpace(token))
+            return BadRequest(new { error = "Thiếu token." });
+
+        // 2) Validate token (đồng nhất với JwtBearer)
         var tvp = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
             ValidIssuer = _cfg["Jwt:Issuer"],
             ValidAudience = _cfg["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.FromMinutes(2) // nới 2 phút để tránh lệch giờ nhỏ
         };
 
         ClaimsPrincipal principal;
         try
         {
             var handler = new JwtSecurityTokenHandler();
-            principal = handler.ValidateToken(req.Token, tvp, out _);
+            principal = handler.ValidateToken(token, tvp, out _);
         }
-        catch
+        catch (Exception)
         {
-            return Unauthorized(new { error = "Token không hợp lệ!" });
+            return Unauthorized(new { error = "Token không hợp lệ hoặc đã hết hạn." });
         }
 
-        var idStr = principal.FindFirstValue(ClaimTypes.NameIdentifier)
-                   ?? principal.FindFirstValue("uid");
+        // 3) Lấy userId từ claims
+        var idStr = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("uid");
         if (!long.TryParse(idStr, out var userId))
-            return Unauthorized(new { error = "Invalid token (no user id)" });
+            return Unauthorized(new { error = "Token không chứa user id." });
 
+        // 4) Truy vấn dữ liệu
         var data = await _db.Users
             .AsNoTracking()
-            .Include(u => u.Profile) // để lấy avatar/address/bio
+            .Include(u => u.Profile)
             .Where(u => u.UserId == userId && u.IsActive)
             .Select(u => new
             {
@@ -498,13 +510,16 @@ public class AccountsController : ControllerBase
                 email = u.Email,
                 phone = u.Phone,
                 gender = u.Gender == null ? null : (u.Gender == 'M' ? "Male" : "Female"),
-                dateOfBirth = u.DateOfBirth.HasValue ? u.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null,
-                createdAt = u.CreatedAt,             
+                dateOfBirth = u.DateOfBirth.HasValue
+                    ? (DateTime?)u.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
+                    : (DateTime?)null,
+                createdAt = u.CreatedAt,
                 avatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
                 address = u.Profile != null ? u.Profile.Address : null,
                 bio = u.Profile != null ? u.Profile.Bio : null,
-                profileUpdatedAt = u.Profile != null ? u.Profile.UpdatedAt : null
-        }).FirstOrDefaultAsync();
+                profileUpdatedAt = u.Profile != null ? (DateTime?)u.Profile.UpdatedAt : (DateTime?)null
+            })
+            .FirstOrDefaultAsync();
 
         if (data == null)
             return NotFound(new { error = "Không tìm thấy người dùng" });
