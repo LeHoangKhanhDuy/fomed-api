@@ -22,11 +22,13 @@ public class AccountsController : ControllerBase
 {
     private readonly FoMedContext _db;
     private readonly IConfiguration _cfg;
+    private readonly ILogger<AccountsController> _logger;
 
-    public AccountsController(FoMedContext db, IConfiguration cfg)
+    public AccountsController(FoMedContext db, IConfiguration cfg, ILogger<AccountsController> logger)
     {
         _db = db;
         _cfg = cfg;
+        _logger = logger;
     }
 
     // ===== Helpers =====
@@ -361,36 +363,42 @@ public class AccountsController : ControllerBase
         }
 
         // --- Gán role mặc định & lưu trong transaction ---
-        using var tx = await _db.Database.BeginTransactionAsync();
+        var strategy = _db.Database.CreateExecutionStrategy();
         try
         {
-            // Seed role PATIENT nếu chưa có
-            var role = await _db.Roles.FirstOrDefaultAsync(r => r.Code == "PATIENT");
-            if (role is null)
+            await strategy.ExecuteAsync(async () =>
             {
-                role = new Role { Code = "PATIENT", Name = "Bệnh nhân", IsActive = true, CreatedAt = DateTime.UtcNow };
-                _db.Roles.Add(role);
+                await using var tx = await _db.Database.BeginTransactionAsync();
+
+                // Seed role PATIENT nếu chưa có (lấy trong tx)
+                var role = await _db.Roles.FirstOrDefaultAsync(r => r.Code == "PATIENT");
+                if (role is null)
+                {
+                    role = new Role { Code = "PATIENT", Name = "Bệnh nhân", IsActive = true, CreatedAt = DateTime.UtcNow };
+                    _db.Roles.Add(role);
+                    await _db.SaveChangesAsync();
+                }
+
+                _db.Users.Add(user);
                 await _db.SaveChangesAsync();
-            }
 
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
+                _db.UserRoles.Add(new UserRole
+                {
+                    UserId = user.UserId,
+                    RoleId = role.RoleId,
+                    AssignedAt = DateTime.UtcNow
+                });
+                await _db.SaveChangesAsync();
 
-            _db.UserRoles.Add(new UserRole
-            {
-                UserId = user.UserId,
-                RoleId = role.RoleId,
-                AssignedAt = DateTime.UtcNow
+                await tx.CommitAsync();
             });
-            await _db.SaveChangesAsync();
-
-            await tx.CommitAsync();
         }
-        catch
+        catch (Exception)
         {
-            await tx.RollbackAsync();
-            return BadRequest(ApiResponse<LoginTokenResponse>.Fail("Đăng ký thất bại, vui lòng thử lại.", 400));
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                ApiResponse<LoginTokenResponse>.Fail("Đăng ký thất bại, vui lòng thử lại.", 500));
         }
+
 
         // --- Tạo JWT + refresh token như login ---
         var roles = new[] { "PATIENT" };
@@ -656,7 +664,6 @@ public class AccountsController : ControllerBase
     [HttpPost("avatar")]
     [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
     [Consumes("multipart/form-data")]
-    [Produces("application/json")]
     [SwaggerOperation(
     Summary = "Upload avatar",
     Description = "Tải lên ảnh đại diện",
@@ -664,34 +671,61 @@ public class AccountsController : ControllerBase
     [RequestSizeLimit(5_000_000)] // 5MB
     public async Task<IActionResult> UploadAvatar([FromForm] AvatarUploadRequest req)
     {
-        var file = req.File;
-        if (file == null || file.Length == 0)
+        if (req.File == null || req.File.Length == 0)
             return BadRequest(new { message = "Vui lòng chọn ảnh." });
 
+        string? idStr =
+            User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+            User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ??
+            User.FindFirst("uid")?.Value ??
+            User.FindFirst("userId")?.Value;
+
+        long userId = 0;
+
+        if (!long.TryParse(idStr, out userId))
+        {
+            // Fallback: tra theo email
+            var email =
+                User.FindFirst(ClaimTypes.Email)?.Value ??
+                User.FindFirst(JwtRegisteredClaimNames.Email)?.Value ??
+                User.Identity?.Name;
+
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { message = "Unauthorized" });
+
+            var userIdQ = await _db.Users
+                .Where(u => u.Email == email)
+                .Select(u => u.UserId)
+                .FirstOrDefaultAsync();
+
+            if (userIdQ <= 0)
+                return Unauthorized(new { message = "Unauthorized" });
+
+            userId = userIdQ;
+        }
+
+        // ========= Validate file =========
         const long MaxBytes = 5_000_000;
-        if (file.Length > MaxBytes)
+        if (req.File.Length > MaxBytes)
             return BadRequest(new { message = "Ảnh vượt quá dung lượng tối đa 5MB." });
 
         var allowedMime = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp" };
-        if (!allowedMime.Contains(file.ContentType))
+        if (!allowedMime.Contains(req.File.ContentType))
             return BadRequest(new { message = "Chỉ hỗ trợ JPG/PNG/WebP." });
 
-        var ext = Path.GetExtension(file.FileName);
+        var ext = Path.GetExtension(req.File.FileName);
         var allowedExt = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".webp" };
         if (!allowedExt.Contains(ext))
             return BadRequest(new { message = "Định dạng tệp không hợp lệ." });
 
-        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("uid");
-        if (!long.TryParse(idStr, out var userId))
-            return Unauthorized(new { message = "Unauthorized" });
-
+        // ========= Save =========
         var root = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "avatars");
         Directory.CreateDirectory(root);
         var fileName = $"{userId}_{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
         var absPath = Path.Combine(root, fileName);
 
         using (var stream = System.IO.File.Create(absPath))
-            await file.CopyToAsync(stream);
+            await req.File.CopyToAsync(stream);
 
         var publicUrl = $"/uploads/avatars/{fileName}";
         var fullUrl = $"{Request.Scheme}://{Request.Host}{publicUrl}";
