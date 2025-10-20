@@ -23,10 +23,15 @@ public class AdminController : ControllerBase
     [HttpGet("users")]
     [Produces("application/json")]
     [SwaggerOperation(
-    Summary = "Lấy danh sách người dùng",
-    Description = "Chỉ ADMIN mới có thể Quản lý người dùng",
-    Tags = new[] { "Users" })]
-    public async Task<IActionResult> GetAllUsers([FromQuery] int page = 1, [FromQuery(Name = "limit")] int limit = 10, CancellationToken ct = default)
+        Summary = "Lấy danh sách người dùng",
+        Description = "Chỉ ADMIN mới có thể Quản lý người dùng",
+        Tags = new[] { "Users" })]
+    public async Task<IActionResult> GetAllUsers(
+        [FromQuery] int page = 1,
+        [FromQuery] int limit = 10,
+        [FromQuery] string? keyword = null,
+        [FromQuery] string? role = null,
+        CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 200);
@@ -34,12 +39,30 @@ public class AdminController : ControllerBase
         // Base query
         var q = _db.Users.AsNoTracking();
 
-        // Tổng số bản ghi
+        // ✅ Filter by keyword
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var kw = keyword.Trim().ToLower();
+            q = q.Where(u =>
+                u.FullName.ToLower().Contains(kw) ||
+                (u.Email != null && u.Email.ToLower().Contains(kw)) ||
+                (u.Phone != null && u.Phone.Contains(kw))
+            );
+        }
+
+        // ✅ Filter by role
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            var roleCode = role.Trim().ToUpperInvariant();
+            q = q.Where(u => u.UserRoles.Any(ur => ur.Role.Code == roleCode));
+        }
+
+        // Tổng số bản ghi sau filter
         var total = await q.CountAsync(ct);
 
-        // Sắp xếp mặc định: mới nhất trước
+        // ✅ Sắp xếp: mới nhất trước
         var items = await q
-            .OrderBy(u => u.UserId)
+            .OrderByDescending(u => u.CreatedAt)
             .Skip((page - 1) * limit)
             .Take(limit)
             .Select(u => new
@@ -51,12 +74,12 @@ public class AdminController : ControllerBase
                 u.IsActive,
                 u.CreatedAt,
                 Roles = u.UserRoles.Select(r => r.Role.Code).ToArray(),
-                Profile = new
+                Profile = u.Profile != null ? new
                 {
-                    AvatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
-                    Address = u.Profile != null ? u.Profile.Address : null,
-                    Bio = u.Profile != null ? u.Profile.Bio : null
-                }
+                    u.Profile.AvatarUrl,
+                    u.Profile.Address,
+                    u.Profile.Bio
+                } : null
             })
             .ToListAsync(ct);
 
@@ -68,7 +91,7 @@ public class AdminController : ControllerBase
             {
                 page,
                 limit,
-                totalItems = total,
+                total,
                 totalPages = (int)Math.Ceiling(total / (double)limit),
                 items
             }
@@ -79,9 +102,9 @@ public class AdminController : ControllerBase
     [HttpGet("user-details/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(
-    Summary = "Lấy danh sách 1 người dùng",
-    Description = "Chỉ ADMIN mới có thể Quản lý người dùng",
-    Tags = new[] { "Users" })]
+        Summary = "Lấy chi tiết 1 người dùng",
+        Description = "Chỉ ADMIN mới có thể xem chi tiết người dùng",
+        Tags = new[] { "Users" })]
     public async Task<IActionResult> GetUserById([FromRoute] long id, CancellationToken ct = default)
     {
         var user = await _db.Users
@@ -93,14 +116,18 @@ public class AdminController : ControllerBase
                 u.FullName,
                 u.Email,
                 u.Phone,
+                u.Gender,
+                u.DateOfBirth,
                 u.IsActive,
+                u.CreatedAt,
+                u.UpdatedAt,
                 Roles = u.UserRoles.Select(r => r.Role.Code).ToArray(),
-                Profile = new
+                Profile = u.Profile != null ? new
                 {
-                    AvatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
-                    Address = u.Profile != null ? u.Profile.Address : null,
-                    Bio = u.Profile != null ? u.Profile.Bio : null
-                }
+                    u.Profile.AvatarUrl,
+                    u.Profile.Address,
+                    u.Profile.Bio
+                } : null
             })
             .FirstOrDefaultAsync(ct);
 
@@ -119,10 +146,13 @@ public class AdminController : ControllerBase
     [HttpPut("user-update/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(
-    Summary = "Cập nhật thông tin người dùng",
-    Description = "Chỉ ADMIN mới có thể Quản lý người dùng",
-    Tags = new[] { "Users" })]
-    public async Task<IActionResult> UpdateUser([FromRoute] long id, [FromBody] UpdateUserRequest req, CancellationToken ct = default)
+        Summary = "Cập nhật vai trò người dùng",
+        Description = "Chỉ ADMIN mới có thể cập nhật vai trò người dùng",
+        Tags = new[] { "Users" })]
+    public async Task<IActionResult> UpdateUser(
+        [FromRoute] long id,
+        [FromBody] UpdateUserRequest req,
+        CancellationToken ct = default)
     {
         if (req?.Roles == null || req.Roles.Count == 0)
             return BadRequest(new { success = false, message = "Danh sách role không được rỗng." });
@@ -140,6 +170,7 @@ public class AdminController : ControllerBase
         if (user == null)
             return NotFound(new { success = false, message = "Không tìm thấy user" });
 
+        // ✅ Validate roles exist
         var dbRoles = await _db.Roles
             .Where(r => newCodes.Contains(r.Code))
             .ToListAsync(ct);
@@ -148,54 +179,62 @@ public class AdminController : ControllerBase
         if (missing.Count > 0)
             return BadRequest(new { success = false, message = "Một số role không tồn tại.", invalid = missing });
 
-        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("uid");
-        if (!long.TryParse(idStr, out var currentUserId))
+        // ✅ Get current user ID
+        var currentUserId = GetCurrentUserId();
+        if (currentUserId == null)
             return Unauthorized(new { success = false, message = "Token không hợp lệ." });
 
-        // Không tự bỏ quyền ADMIN của chính mình
+        // ✅ Prevent self-demotion
         if (currentUserId == id && !newCodes.Contains("ADMIN"))
             return BadRequest(new { success = false, message = "Không thể tự bỏ quyền ADMIN của chính bạn." });
 
-        // Đảm bảo còn ít nhất 1 ADMIN hoạt động
+        // ✅ Ensure at least 1 active ADMIN remains
         if (!newCodes.Contains("ADMIN"))
         {
-            var adminCount = await _db.UserRoles
-                .AsNoTracking()
-                .Where(ur => ur.Role.Code == "ADMIN" && ur.User.IsActive)
-                .CountAsync(ct);
-
             var isTargetAdmin = user.UserRoles.Any(ur => ur.Role.Code == "ADMIN");
-            if (isTargetAdmin && adminCount <= 1)
-                return BadRequest(new { success = false, message = "Phải còn ít nhất 1 ADMIN hoạt động." });
+            if (isTargetAdmin && user.IsActive)
+            {
+                var otherActiveAdminCount = await _db.UserRoles
+                    .AsNoTracking()
+                    .Where(ur => ur.Role.Code == "ADMIN"
+                        && ur.User.IsActive
+                        && ur.UserId != id)
+                    .Select(ur => ur.UserId)
+                    .Distinct()
+                    .CountAsync(ct);
+
+                if (otherActiveAdminCount == 0)
+                    return BadRequest(new { success = false, message = "Phải còn ít nhất 1 ADMIN hoạt động." });
+            }
         }
 
-        using var tx = await _db.Database.BeginTransactionAsync(ct);
+        // ✅ Efficient diff-based update
+        var currentRoles = user.UserRoles.ToDictionary(x => x.Role.Code, x => x);
+        var targetRoles = dbRoles.ToDictionary(x => x.Code, x => x);
 
-        // Diff thay vì Clear/Add toàn bộ (ít ghi DB hơn)
-        var currentMap = user.UserRoles.ToDictionary(x => x.Role.Code, x => x);
-        var targetMap = dbRoles.ToDictionary(x => x.Code, x => x);
-
-        // Remove roles không còn
-        foreach (var kv in currentMap)
+        // Remove old roles
+        foreach (var code in currentRoles.Keys)
         {
-            if (!targetMap.ContainsKey(kv.Key))
-                _db.UserRoles.Remove(kv.Value);
+            if (!targetRoles.ContainsKey(code))
+                _db.UserRoles.Remove(currentRoles[code]);
         }
 
-        // Add roles mới
-        foreach (var kv in targetMap)
+        // Add new roles
+        foreach (var code in targetRoles.Keys)
         {
-            if (!currentMap.ContainsKey(kv.Key))
+            if (!currentRoles.ContainsKey(code))
+            {
                 _db.UserRoles.Add(new UserRole
                 {
                     UserId = user.UserId,
-                    RoleId = kv.Value.RoleId,
+                    RoleId = targetRoles[code].RoleId,
                     AssignedAt = DateTime.UtcNow
                 });
+            }
         }
 
+        user.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
 
         return Ok(new
         {
@@ -205,14 +244,17 @@ public class AdminController : ControllerBase
         });
     }
 
-    /* ============== XÓA THÔNG TIN NGƯỜI DÙNG ============== */
-    [HttpDelete("user-delete/{id:long}")]
+    /* ============== BẬT / TẮT TÀI KHOẢN ============== */
+    [HttpPatch("user-status/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(
-    Summary = "Vô hiệu hóa người dùng",
-    Description = "Chỉ ADMIN mới có thể Quản lý người dùng",
-    Tags = new[] { "Users" })]
-    public async Task<IActionResult> DeleteUser([FromRoute] long id, CancellationToken ct = default)
+        Summary = "Cập nhật trạng thái hoạt động",
+        Description = "ADMIN có thể khoá (IsActive=false) hoặc mở khoá (IsActive=true) tài khoản",
+        Tags = new[] { "Users" })]
+    public async Task<IActionResult> SetUserStatus(
+        [FromRoute] long id,
+        [FromBody] UserStatusRequest req,
+        CancellationToken ct = default)
     {
         var user = await _db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
@@ -221,29 +263,49 @@ public class AdminController : ControllerBase
         if (user == null)
             return NotFound(new { success = false, message = "Không tìm thấy user" });
 
-        // Không tự vô hiệu hóa chính mình
-        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("uid");
-        if (long.TryParse(idStr, out var currentUserId) && currentUserId == id)
-            return BadRequest(new { success = false, message = "Không thể tự vô hiệu hóa tài khoản của chính bạn." });
+        var currentUserId = GetCurrentUserId();
 
-        // Nếu user là ADMIN cuối cùng đang active thì chặn
-        var isTargetAdmin = user.UserRoles.Any(ur => ur.Role.Code == "ADMIN");
-        if (isTargetAdmin)
+        // ✅ Prevent locking yourself
+        if (!req.IsActive && currentUserId == id)
+            return BadRequest(new { success = false, message = "Không thể tự vô hiệu hoá tài khoản của chính bạn." });
+
+        // ✅ Ensure at least 1 active ADMIN remains when locking
+        if (!req.IsActive)
         {
-            var adminActiveCount = await _db.UserRoles
-                .AsNoTracking()
-                .Where(ur => ur.Role.Code == "ADMIN" && ur.User.IsActive && ur.UserId != id)
-                .Select(ur => ur.UserId)
-                .Distinct()
-                .CountAsync(ct);
+            var isTargetAdmin = user.UserRoles.Any(ur => ur.Role.Code == "ADMIN");
+            if (isTargetAdmin && user.IsActive)
+            {
+                var otherActiveAdminCount = await _db.UserRoles
+                    .AsNoTracking()
+                    .Where(ur => ur.Role.Code == "ADMIN"
+                        && ur.User.IsActive
+                        && ur.UserId != id)
+                    .Select(ur => ur.UserId)
+                    .Distinct()
+                    .CountAsync(ct);
 
-            if (adminActiveCount == 0)
-                return BadRequest(new { success = false, message = "Phải còn ít nhất 1 ADMIN hoạt động." });
+                if (otherActiveAdminCount == 0)
+                    return BadRequest(new { success = false, message = "Phải còn ít nhất 1 ADMIN hoạt động." });
+            }
         }
 
-        user.IsActive = false;
+        user.IsActive = req.IsActive;
+        user.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new { success = true, message = "Vô hiệu hóa user thành công" });
+        return Ok(new
+        {
+            success = true,
+            message = req.IsActive ? "Đã mở khoá tài khoản." : "Đã khoá tài khoản."
+        });
+    }
+
+    /* ============== HELPER METHODS ============== */
+    private long? GetCurrentUserId()
+    {
+        var idStr = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                    ?? User.FindFirstValue("uid");
+        return long.TryParse(idStr, out var id) ? id : null;
     }
 }
+

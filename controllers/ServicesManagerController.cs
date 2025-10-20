@@ -190,19 +190,46 @@ public class ServiceCateController : ControllerBase
 
     /* ============== XÓA DANH MỤC DỊCH VỤ =============== */
     [HttpDelete("remove/{id:int}")]
-    [Produces("application/json")]
-    [SwaggerOperation(Summary = "Xóa dịch vụ", Description = "Chỉ xóa khi không còn ràng buộc quan trọng (tùy nghiệp vụ)", Tags = new[] { "Services" })]
+    [SwaggerOperation(Summary = "Xóa dịch vụ", Description = "Chỉ xóa khi không còn hoạt động", Tags = new[] { "Services" })]
     public async Task<IActionResult> Delete([FromRoute] int id)
     {
         var s = await _db.Services.FindAsync(id);
         if (s == null) return NotFound(new { success = false, message = "Không tìm thấy dịch vụ." });
 
-        var used = await _db.InvoiceItems.AnyAsync(ii => ii.RefType == "Service" && ii.RefId == id);
-        if (used) return BadRequest(new { success = false, message = "Dịch vụ đang được sử dụng, không thể xóa." });
+        try
+        {
+            var inUse =
+                await _db.InvoiceItems.AnyAsync(ii => ii.RefType == "Service" && ii.RefId == id)
+                || await _db.LabOrders.AnyAsync(lo => lo.ServiceId == id); // <== THÊM DÒNG NÀY
 
-        _db.Services.Remove(s);
-        await _db.SaveChangesAsync();
+            if (inUse)
+            {
+                s.IsActive = false;          // hoặc s.IsDeleted = true nếu bạn có cột này
+                s.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
 
-        return Ok(new { success = true, message = "Xóa dịch vụ thành công" });
+                return Ok(new
+                {
+                    success = true,
+                    softDeleted = true,
+                    message = "Dịch vụ đang được sử dụng → đã chuyển sang 'không hoạt động'."
+                });
+            }
+
+            _db.Services.Remove(s);
+            await _db.SaveChangesAsync();
+            return Ok(new { success = true, message = "Xóa dịch vụ thành công" });
+        }
+        catch (DbUpdateException ex)
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = "Không thể xoá do ràng buộc dữ liệu (FK). Hãy dùng soft delete hoặc gỡ tham chiếu trước.",
+                detail = ex.InnerException?.Message ?? ex.Message
+            });
+        }
     }
+
+
 }

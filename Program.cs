@@ -43,12 +43,19 @@ builder.Services.AddDbContext<FoMedContext>(opt =>
 
 // Controllers + JSON options
 builder.Services.AddControllers()
-    .AddJsonOptions(o =>
+    .AddJsonOptions(options =>
     {
-        o.JsonSerializerOptions.Converters.Add(new JsonDateOnlyConverter("dd/MM/yyyy"));
-        o.JsonSerializerOptions.Converters.Add(new JsonDateTimeConverter("dd/MM/yyyy"));
-        o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
-        o.JsonSerializerOptions.PropertyNamingPolicy = null; // giữ casing model
+        // ✅ Convert PascalCase -> camelCase
+        options.JsonSerializerOptions.PropertyNamingPolicy =
+            System.Text.Json.JsonNamingPolicy.CamelCase;
+
+        // ✅ Ignore null values (optional)
+        options.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+
+        // ✅ Format DateTime as ISO 8601
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 
 // ------------- CORS (2 policy) -------------

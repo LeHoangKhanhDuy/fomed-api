@@ -1,3 +1,4 @@
+
 using System.ComponentModel.DataAnnotations;
 
 public sealed class AccessTokenRequest
@@ -7,5 +8,12 @@ public sealed class AccessTokenRequest
     public string Email { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Mật khẩu không được bỏ trống.")]
+    [MinLength(6, ErrorMessage = "Mật khẩu phải có ít nhất 6 ký tự.")]
     public string Password { get; set; } = string.Empty;
+}
+
+
+public sealed class UserStatusRequest
+{
+    public bool IsActive { get; set; }
 }
