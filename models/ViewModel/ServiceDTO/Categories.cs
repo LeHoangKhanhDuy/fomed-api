@@ -11,6 +11,10 @@ namespace FoMed.Api.Dtos.ServiceCategories
         [StringLength(100, ErrorMessage = "Tên danh mục tối đa 100 ký tự.")]
         public string Name { get; set; } = "";
 
+        [StringLength(300, ErrorMessage = "URL ảnh tối đa 300 ký tự.")]
+        [Url(ErrorMessage = "ImageUrl phải là URL hợp lệ.")]
+        public string? ImageUrl { get; set; }
+
         public bool IsActive { get; set; } = true;
     }
 

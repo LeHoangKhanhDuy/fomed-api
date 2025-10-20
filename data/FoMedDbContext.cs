@@ -76,6 +76,7 @@ public class FoMedContext : DbContext
         m.Entity<Service>(e =>
         {
             e.Property(x => x.BasePrice).HasColumnType("decimal(18,2)");
+            e.Property(x => x.ImageUrl).HasMaxLength(300);
             e.HasIndex(x => x.Code).IsUnique().HasFilter("[Code] IS NOT NULL");
             e.HasOne(s => s.Category).WithMany(c => c.Services)
              .HasForeignKey(s => s.CategoryId).OnDelete(DeleteBehavior.Restrict);
@@ -83,6 +84,7 @@ public class FoMedContext : DbContext
 
         m.Entity<ServiceCategory>(e =>
         {
+            e.Property(c => c.ImageUrl).HasMaxLength(300);
             e.HasIndex(c => c.Name).IsUnique();
             e.HasIndex(c => c.Code).IsUnique().HasFilter("[Code] IS NOT NULL");
         });

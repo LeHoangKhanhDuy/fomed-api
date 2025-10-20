@@ -6,8 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 
 [ApiController]
-[Route("api/v1/admin/services")]
-[Authorize(Roles = "ADMIN")]
+[Route("api/v1/services")]
 public class ServiceCateController : ControllerBase
 {
     private readonly FoMedContext _db;
@@ -44,9 +43,10 @@ public class ServiceCateController : ControllerBase
                 s.BasePrice,
                 s.DurationMin,
                 s.IsActive,
+                s.ImageUrl,
                 Category = s.Category == null
                     ? null
-                    : new { s.Category.CategoryId, s.Category.Name }
+                    : new { s.Category.CategoryId, s.Category.Name, s.Category.ImageUrl }
             })
             .ToListAsync();
 
@@ -80,9 +80,10 @@ public class ServiceCateController : ControllerBase
                 s.BasePrice,
                 s.DurationMin,
                 s.IsActive,
+                s.ImageUrl,
                 Category = s.Category == null
                 ? null
-                : new { s.Category.CategoryId, s.Category.Name }
+                : new { s.Category.CategoryId, s.Category.Name, s.Category.ImageUrl }
             }).FirstOrDefaultAsync();
         if (service == null)
             return NotFound(new { success = false, message = "Không tìm thấy dịch vụ." });
@@ -118,6 +119,7 @@ public class ServiceCateController : ControllerBase
             BasePrice = req.BasePrice ?? 0,
             DurationMin = req.DurationMin,
             IsActive = req.IsActive,
+            ImageUrl = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl!.Trim(),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -162,6 +164,7 @@ public class ServiceCateController : ControllerBase
         if (req.DurationMin.HasValue) s.DurationMin = req.DurationMin.Value;
         s.CategoryId = req.CategoryId;
         s.IsActive = req.IsActive;
+        s.ImageUrl = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl!.Trim();
         s.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();

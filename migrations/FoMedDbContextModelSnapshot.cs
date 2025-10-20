@@ -149,6 +149,10 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<string>("LicenseNo")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<int?>("PrimarySpecialtyId")
                         .HasColumnType("int");
 
@@ -428,6 +432,44 @@ namespace FoMed_WebAPI.Migrations
                     b.ToTable("EmailVerificationTokens");
                 });
 
+            modelBuilder.Entity("FoMed.Api.Models.Employee", b =>
+                {
+                    b.Property<int>("EmployeeId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("EmployeeId"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Department")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateOnly?>("HireDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Position")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("EmployeeId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Employees");
+                });
+
             modelBuilder.Entity("FoMed.Api.Models.Encounter", b =>
                 {
                     b.Property<long>("EncounterId")
@@ -438,6 +480,10 @@ namespace FoMed_WebAPI.Migrations
 
                     b.Property<long?>("AppointmentId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -492,7 +538,9 @@ namespace FoMed_WebAPI.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("EncLabTestId"));
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("CustomName")
                         .HasColumnType("nvarchar(max)");
@@ -508,7 +556,10 @@ namespace FoMed_WebAPI.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("ordered");
 
                     b.HasKey("EncLabTestId");
 
@@ -533,11 +584,26 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<string>("Advice")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Code")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<long>("EncounterId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("ErxCode")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ErxStatus")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ExpiryAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Warning")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("PrescriptionId");
 
@@ -710,7 +776,9 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("ResultAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("ResultJson")
                         .HasColumnType("nvarchar(max)");
@@ -720,11 +788,14 @@ namespace FoMed_WebAPI.Migrations
 
                     b.Property<string>("ResultStatus")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("normal");
 
                     b.HasKey("LabResultId");
 
-                    b.HasIndex("EncLabTestId");
+                    b.HasIndex("EncLabTestId", "ResultAt");
 
                     b.ToTable("LabResults");
                 });
@@ -741,10 +812,13 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Code")
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -754,11 +828,14 @@ namespace FoMed_WebAPI.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.HasKey("LabTestId");
 
-                    b.HasIndex("Code");
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasFilter("[Code] IS NOT NULL");
 
                     b.ToTable("LabTests");
                 });
@@ -860,14 +937,18 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<string>("Address")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("AllergyText")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
                     b.Property<string>("City")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateOnly?>("DateOfBirth")
-                        .HasColumnType("date");
+                    b.Property<DateTime?>("DateOfBirth")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("District")
                         .HasColumnType("nvarchar(max)");
@@ -894,6 +975,11 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PatientCode")
+                        .HasMaxLength(30)
+                        .IsUnicode(true)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
@@ -911,12 +997,16 @@ namespace FoMed_WebAPI.Migrations
 
                     b.HasIndex("FullName");
 
+                    b.HasIndex("PatientCode")
+                        .IsUnique()
+                        .HasFilter("[PatientCode] IS NOT NULL");
+
                     b.HasIndex("Phone")
                         .IsUnique();
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Patients");
+                    b.ToTable("Patients", (string)null);
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.Payment", b =>
@@ -1083,6 +1173,10 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<short?>("DurationMin")
                         .HasColumnType("smallint");
 
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -1118,6 +1212,10 @@ namespace FoMed_WebAPI.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("ImageUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -1416,6 +1514,131 @@ namespace FoMed_WebAPI.Migrations
                         });
                 });
 
+            modelBuilder.Entity("LabOrder", b =>
+                {
+                    b.Property<long>("LabOrderId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("LabOrderId"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(0)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<int?>("DoctorId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<long>("PatientId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ResultAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("SampleTakenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SampleType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ServiceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("processing");
+
+                    b.Property<string>("Warning")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("LabOrderId");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("DoctorId");
+
+                    b.HasIndex("PatientId");
+
+                    b.HasIndex("ServiceId");
+
+                    b.ToTable("LabOrders", (string)null);
+                });
+
+            modelBuilder.Entity("LabOrderItem", b =>
+                {
+                    b.Property<long>("LabOrderItemId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("LabOrderItemId"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(0)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsHigh")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsLow")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("LabOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal?>("ReferenceMax")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("ReferenceMin")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ReferenceText")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ResultValue")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("TestName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("LabOrderItemId");
+
+                    b.HasIndex("LabOrderId", "DisplayOrder", "LabOrderItemId")
+                        .HasDatabaseName("IX_LabOrderItems_Order");
+
+                    b.ToTable("LabOrderItems", (string)null);
+                });
+
             modelBuilder.Entity("UserProfile", b =>
                 {
                     b.Property<long>("UserId")
@@ -1597,6 +1820,17 @@ namespace FoMed_WebAPI.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("FoMed.Api.Models.Employee", b =>
+                {
+                    b.HasOne("FoMed.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("FoMed.Api.Models.Encounter", b =>
                 {
                     b.HasOne("FoMed.Api.Models.Appointment", "Appointment")
@@ -1697,7 +1931,7 @@ namespace FoMed_WebAPI.Migrations
             modelBuilder.Entity("FoMed.Api.Models.LabResult", b =>
                 {
                     b.HasOne("FoMed.Api.Models.EncounterLabTest", "EncLabTest")
-                        .WithMany("Results")
+                        .WithMany("LabResults")
                         .HasForeignKey("EncLabTestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1849,6 +2083,42 @@ namespace FoMed_WebAPI.Migrations
                     b.Navigation("Medicine");
                 });
 
+            modelBuilder.Entity("LabOrder", b =>
+                {
+                    b.HasOne("FoMed.Api.Models.Doctor", "Doctor")
+                        .WithMany()
+                        .HasForeignKey("DoctorId");
+
+                    b.HasOne("FoMed.Api.Models.Patient", "Patient")
+                        .WithMany()
+                        .HasForeignKey("PatientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FoMed.Api.Models.Service", "Service")
+                        .WithMany()
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Doctor");
+
+                    b.Navigation("Patient");
+
+                    b.Navigation("Service");
+                });
+
+            modelBuilder.Entity("LabOrderItem", b =>
+                {
+                    b.HasOne("LabOrder", "LabOrder")
+                        .WithMany("Items")
+                        .HasForeignKey("LabOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabOrder");
+                });
+
             modelBuilder.Entity("UserProfile", b =>
                 {
                     b.HasOne("FoMed.Api.Models.User", "User")
@@ -1884,7 +2154,7 @@ namespace FoMed_WebAPI.Migrations
 
             modelBuilder.Entity("FoMed.Api.Models.EncounterLabTest", b =>
                 {
-                    b.Navigation("Results");
+                    b.Navigation("LabResults");
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.EncounterPrescription", b =>
@@ -1946,6 +2216,11 @@ namespace FoMed_WebAPI.Migrations
                     b.Navigation("Sessions");
 
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("LabOrder", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

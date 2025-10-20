@@ -17,6 +17,10 @@ namespace FoMed.Api.Dtos.Services
         public short? DurationMin { get; set; }
 
         public bool IsActive { get; set; } = true;
+        
+        [StringLength(300, ErrorMessage = "URL ảnh tối đa 300 ký tự.")]
+        [Url(ErrorMessage = "ImageUrl phải là URL hợp lệ.")]
+        public string? ImageUrl { get; set; }
 
         // Optional ở base để dùng lại cho Update (có thể không đổi danh mục)
         public int? CategoryId { get; set; }
