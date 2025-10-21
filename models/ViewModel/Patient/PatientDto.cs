@@ -7,11 +7,18 @@ public record PatientListVm(
     string? PatientCode,
     string FullName,
     string? Gender,
+    string? DateOfBirth,   // "yyyy-MM-dd" hoặc null
     string Phone,
     string? Email,
+    string? Address,
+    string? District,
+    string? City,
+    string? Province,
+    string? IdentityNo,
     bool IsActive,
     DateTime CreatedAt
 );
+
 
 public record PatientDetailVm(
     long PatientId,

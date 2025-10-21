@@ -43,12 +43,27 @@ public class PatientsController : ControllerBase
         if (isActive.HasValue) q = q.Where(x => x.IsActive == isActive.Value);
 
         var total = await q.CountAsync(ct);
-        var items = await q.OrderByDescending(x => x.CreatedAt)
-            .Skip((page - 1) * limit).Take(limit)
-            .Select(x => new PatientListVm(
-                x.PatientId, x.PatientCode, x.FullName, x.Gender,
-                x.Phone, x.Email, x.IsActive, x.CreatedAt))
-            .ToListAsync(ct);
+        var items = await q
+    .OrderByDescending(x => x.CreatedAt)
+    .Skip((page - 1) * limit)
+    .Take(limit)
+    .Select(x => new PatientListVm(
+        x.PatientId,
+        x.PatientCode,
+        x.FullName,
+        x.Gender,
+        x.DateOfBirth == null ? null : x.DateOfBirth.Value.ToString("yyyy-MM-dd"),
+        x.Phone,
+        x.Email,
+        x.Address,
+        x.District,
+        x.City,
+        x.Province,
+        x.IdentityNo,
+        x.IsActive,
+        x.CreatedAt
+    ))
+    .ToListAsync(ct);
 
         return Ok(new
         {
