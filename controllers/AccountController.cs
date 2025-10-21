@@ -192,23 +192,60 @@ public class AccountsController : ControllerBase
     [Produces("application/json")]
     [Consumes("application/json")]
     [ProducesResponseType(typeof(ApiResponse<LoginTokenResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<LoginTokenResponse>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<LoginTokenResponse>), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse<LoginTokenResponse>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<LoginTokenResponse>), StatusCodes.Status423Locked)]
     public async Task<IActionResult> Login([FromBody] LoginWithEmailRequest req)
     {
+        // (1) Validate input đơn giản (nếu bạn có [Required] trên DTO thì có thể bỏ)
+        if (string.IsNullOrWhiteSpace(req?.Email) || string.IsNullOrWhiteSpace(req?.Password))
+            return BadRequest(ApiResponse<LoginTokenResponse>.Fail("Dữ liệu không hợp lệ.", 400));
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        var password = req.Password;
+
+        // (2) Tải user + roles
         var user = await _db.Users
             .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.IsActive && u.Email == req.Email);
+            .FirstOrDefaultAsync(u => u.Email == email);
 
-        if (user is null || !PasswordHasher.Verify(req.Password, user.PasswordHash, user.PasswordSalt))
+        // Không tiết lộ là email hay pass sai
+        if (user is null || !user.IsActive)
+        {
+            // Nếu user tồn tại nhưng IsActive = false → 403
+            if (user is not null && !user.IsActive)
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    ApiResponse<LoginTokenResponse>.Fail("Tài khoản đã bị vô hiệu hóa.", 403));
+
+            return Unauthorized(ApiResponse<LoginTokenResponse>.Fail("Email hoặc mật khẩu không đúng.", 401));
+        }
+
+        // (3) Kiểm tra khoá tài khoản (tùy schema bạn có IsLocked / LockedUntil)
+        // Giả định 2 field phổ biến:
+        //   - bool IsLocked
+        //   - DateTime? LockedUntil (UTC)
+        var isLocked = (bool)(user.GetType().GetProperty("IsLocked")?.GetValue(user) ?? false);
+        var lockedUntil = (DateTime?)user.GetType().GetProperty("LockedUntil")?.GetValue(user);
+
+        if (isLocked || (lockedUntil.HasValue && lockedUntil.Value > DateTime.UtcNow))
+        {
+            var msg = lockedUntil.HasValue
+                ? $"Tài khoản đang bị khoá đến {lockedUntil.Value:HH:mm dd/MM/yyyy}."
+                : "Tài khoản đang bị khoá.";
+            return StatusCode(StatusCodes.Status423Locked, ApiResponse<LoginTokenResponse>.Fail(msg, 423));
+        }
+
+        // (4) Xác thực mật khẩu
+        var ok = PasswordHasher.Verify(password, user.PasswordHash, user.PasswordSalt);
+        if (!ok)
             return Unauthorized(ApiResponse<LoginTokenResponse>.Fail("Email hoặc mật khẩu không đúng.", 401));
 
+        // (5) Tạo token + refresh token
         var roleCodes = NormalizeRoles(user.UserRoles.Select(r => r.Role.Code));
-
         var extraClaims = await BuildExtraClaimsAsync(user.UserId, roleCodes);
-
         var (accessToken, expiresAt) = GenerateJwt(user, roleCodes, extraClaims);
 
-        // refresh token stateful
         var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
         var refreshDays = int.Parse(_cfg["Jwt:RefreshDays"]!);
 
@@ -235,7 +272,7 @@ public class AccountsController : ControllerBase
             Roles = roleCodes
         };
 
-        return Ok(ApiResponse<LoginTokenResponse>.Success(data, "Đăng nhập thành công"));
+        return Ok(ApiResponse<LoginTokenResponse>.Success(data, "Đăng nhập thành công", 200));
     }
 
     // ===== REFRESH TOKEN =====
