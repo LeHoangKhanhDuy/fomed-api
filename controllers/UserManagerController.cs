@@ -62,7 +62,7 @@ public class AdminController : ControllerBase
 
         // ✅ Sắp xếp: mới nhất trước
         var items = await q
-            .OrderByDescending(u => u.CreatedAt)
+            .OrderByDescending(u => u.UserId)
             .Skip((page - 1) * limit)
             .Take(limit)
             .Select(u => new

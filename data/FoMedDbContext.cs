@@ -68,8 +68,8 @@ public class FoMedContext : DbContext
 
         // Converter cho LabStatus (LabOrders)
         var labStatusConverter = new ValueConverter<LabStatus, string>(
-            v => v.ToString().ToLowerInvariant(),                  // enum -> "normal"
-            s => Enum.Parse<LabStatus>((s ?? "Processing"), true)  // "normal" -> enum (ignoreCase)
+            v => v.ToString().ToLowerInvariant(),
+            s => Enum.Parse<LabStatus>((s ?? "Processing"), true)
         );
 
         // ---------- Service ----------
@@ -211,7 +211,7 @@ public class FoMedContext : DbContext
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
         });
 
-        // ---------- Patients & Visits ----------
+        // ---------- Patients ----------
         m.Entity<Patient>(e =>
         {
             e.ToTable("Patients");
@@ -223,23 +223,36 @@ public class FoMedContext : DbContext
             e.Property(x => x.AllergyText).HasMaxLength(300);
         });
 
+        // ---------- Appointments ----------
         m.Entity<Appointment>(e =>
         {
             e.HasOne(x => x.Patient).WithMany().HasForeignKey(x => x.PatientId);
             e.HasOne(x => x.Doctor).WithMany().HasForeignKey(x => x.DoctorId);
             e.HasOne(x => x.Service).WithMany().HasForeignKey(x => x.ServiceId);
+
             e.Property(x => x.Code).HasMaxLength(30);
             e.HasIndex(x => x.Code).HasFilter("[Code] IS NOT NULL");
+
+            e.Property(x => x.Status).HasMaxLength(20);
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("CK_Appointments_Status",
                     "Status IN ('waiting','booked','done','cancelled','no_show')");
             });
-            // Các index phục vụ tra cứu/lập lịch
+
+            // Tra cứu nhanh
             e.HasIndex(x => new { x.DoctorId, x.VisitDate, x.Status, x.VisitTime });
+
+            // Chống trùng giờ cùng bác sĩ
             e.HasIndex(x => new { x.DoctorId, x.VisitDate, x.VisitTime })
              .IsUnique()
-             .HasFilter("[Status] IN ('waiting','booked','done')");
+             .HasDatabaseName("UX_App_Doctor_Date_Time");
+
+            // STT duy nhất theo (Bác sĩ + Ngày + QueueNo) - cho phép NULL
+            e.HasIndex(x => new { x.DoctorId, x.VisitDate, x.QueueNo })
+             .IsUnique()
+             .HasFilter("[QueueNo] IS NOT NULL")
+             .HasDatabaseName("UX_App_Doctor_Date_Queue");
         });
 
         m.Entity<VisitQueue>(e =>
@@ -255,19 +268,12 @@ public class FoMedContext : DbContext
             e.HasOne(x => x.Patient).WithMany().HasForeignKey(x => x.PatientId);
             e.HasOne(x => x.Doctor).WithMany().HasForeignKey(x => x.DoctorId);
             e.HasOne(x => x.Service).WithMany().HasForeignKey(x => x.ServiceId);
-            // Nếu có cột Code cho Encounter, bạn có thể thêm index:
-            // e.HasIndex(x => x.Code).HasFilter("[Code] IS NOT NULL");
         });
 
         m.Entity<EncounterPrescription>(e =>
         {
             e.HasOne(x => x.Encounter).WithMany(x => x.Prescriptions)
              .HasForeignKey(x => x.EncounterId);
-
-            // BẬT các dòng dưới nếu model có các field tương ứng
-            // e.Property(x => x.ErxCode).HasMaxLength(30);
-            // e.Property(x => x.ErxStatus).HasMaxLength(20);
-            // e.Property(x => x.Warning).HasMaxLength(300);
         });
 
         m.Entity<PrescriptionItem>(e =>
@@ -285,7 +291,7 @@ public class FoMedContext : DbContext
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
         });
 
-        // ---------- Lab Orders (phiếu KQ dùng cho UI công khai) ----------
+        // ---------- Lab Orders ----------
         m.Entity<LabOrder>(e =>
         {
             e.ToTable("LabOrders");
@@ -375,10 +381,11 @@ public class FoMedContext : DbContext
         });
     }
 
-    // Cập nhật timestamp cho InventoryTransactions
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
+
+        // InventoryTransactions timestamps
         foreach (var e in ChangeTracker.Entries<InventoryTransaction>())
         {
             if (e.State == EntityState.Added)
@@ -391,6 +398,21 @@ public class FoMedContext : DbContext
                 e.Entity.UpdatedAt = now;
             }
         }
+
+        // Appointments timestamps
+        foreach (var e in ChangeTracker.Entries<Appointment>())
+        {
+            if (e.State == EntityState.Added)
+            {
+                e.Entity.CreatedAt = now;
+                e.Entity.UpdatedAt = now;
+            }
+            else if (e.State == EntityState.Modified)
+            {
+                e.Entity.UpdatedAt = now;
+            }
+        }
+
         return base.SaveChangesAsync(cancellationToken);
     }
 }

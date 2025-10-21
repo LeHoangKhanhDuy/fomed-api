@@ -75,9 +75,14 @@ namespace FoMed_WebAPI.Migrations
 
                     b.HasIndex("ServiceId");
 
+                    b.HasIndex("DoctorId", "VisitDate", "QueueNo")
+                        .IsUnique()
+                        .HasDatabaseName("UX_App_Doctor_Date_Queue")
+                        .HasFilter("[QueueNo] IS NOT NULL");
+
                     b.HasIndex("DoctorId", "VisitDate", "VisitTime")
                         .IsUnique()
-                        .HasFilter("[Status] IN ('waiting','booked','done')");
+                        .HasDatabaseName("UX_App_Doctor_Date_Time");
 
                     b.HasIndex("DoctorId", "VisitDate", "Status", "VisitTime");
 

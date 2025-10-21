@@ -10,6 +10,7 @@ using Microsoft.OpenApi.Models;
 using FoMed.Api.Auth;
 using FoMed.Api.Models;
 using System.Text;
+using Microsoft.OpenApi.Any;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -106,6 +107,8 @@ builder.Services.AddSwaggerGen(c =>
 
     c.AddSecurityDefinition(jwtScheme.Reference.Id, jwtScheme);
     c.AddSecurityRequirement(new OpenApiSecurityRequirement { { jwtScheme, Array.Empty<string>() } });
+    c.MapType<DateOnly>(() => new OpenApiSchema { Type = "string", Format = "date", Example = new OpenApiString("2025-10-21") });
+    c.MapType<TimeOnly>(() => new OpenApiSchema { Type = "string", Example = new OpenApiString("09:35:00") });
 });
 
 // JWT Auth
