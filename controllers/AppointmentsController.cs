@@ -25,15 +25,37 @@ public sealed class AppointmentsController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Create([FromBody] CreateAppointmentRequest req, CancellationToken ct)
     {
-        // Validate tồn tại
-        if (!await _db.Patients.AnyAsync(p => p.PatientId == req.PatientId, ct))
+        // ✅ Load thông tin bệnh nhân
+        var patient = await _db.Patients
+            .Where(p => p.PatientId == req.PatientId)
+            .Select(p => new { p.PatientId, p.FullName, p.Phone })
+            .FirstOrDefaultAsync(ct);
+        if (patient == null)
             return BadRequest(new { success = false, message = "Bệnh nhân không tồn tại." });
 
-        if (!await _db.Doctors.AnyAsync(d => d.DoctorId == req.DoctorId, ct))
+        // ✅ Load thông tin bác sĩ (JOIN với User để lấy tên)
+        var doctorInfo = await _db.Doctors
+            .Where(d => d.DoctorId == req.DoctorId)
+            .Select(d => new
+            {
+                DoctorId = d.DoctorId,
+                DoctorName = d.User != null ? d.User.FullName : "BS #" + d.DoctorId.ToString()
+            })
+            .FirstOrDefaultAsync(ct);
+        if (doctorInfo == null)
             return BadRequest(new { success = false, message = "Bác sĩ không tồn tại." });
 
-        if (req.ServiceId is int sid && !await _db.Services.AnyAsync(s => s.ServiceId == sid, ct))
-            return BadRequest(new { success = false, message = "Dịch vụ không tồn tại." });
+        // ✅ Load thông tin dịch vụ (nếu có)
+        string? serviceName = null;
+        if (req.ServiceId.HasValue)
+        {
+            serviceName = await _db.Services
+                .Where(s => s.ServiceId == req.ServiceId.Value)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync(ct);
+            if (serviceName == null)
+                return BadRequest(new { success = false, message = "Dịch vụ không tồn tại." });
+        }
 
         // PATIENT chỉ được đặt cho chính mình
         if (User.IsInRole("PATIENT"))
@@ -43,7 +65,10 @@ public sealed class AppointmentsController : ControllerBase
                 return Forbid();
         }
 
-        var lastCode = await _db.Appointments.OrderByDescending(a => a.AppointmentId).Select(a => a.Code).FirstOrDefaultAsync(ct);
+        var lastCode = await _db.Appointments
+            .OrderByDescending(a => a.AppointmentId)
+            .Select(a => a.Code)
+            .FirstOrDefaultAsync(ct);
 
         // Tính số thứ tự kế tiếp
         int nextNumber = 1;
@@ -53,7 +78,6 @@ public sealed class AppointmentsController : ControllerBase
             if (int.TryParse(numericPart, out var n))
                 nextNumber = n + 1;
         }
-
 
         // Không cho đặt quá khứ 
         var nowLocal = DateTime.Now;
@@ -96,9 +120,9 @@ public sealed class AppointmentsController : ControllerBase
                     DoctorId = req.DoctorId,
                     ServiceId = req.ServiceId,
                     VisitDate = req.VisitDate,
-                    VisitTime = req.VisitTime,   // .NET 9: phía FE nên gửi "HH:mm:ss" (vd "09:35:00") trừ khi có converter relax
+                    VisitTime = req.VisitTime,
                     Reason = string.IsNullOrWhiteSpace(req.Reason) ? null : req.Reason!.Trim(),
-                    Status = "waiting",  // waiting | booked | done | cancelled | no_show
+                    Status = "waiting",
                     QueueNo = nextQueue,
                     Code = code,
                     CreatedAt = nowUtc,
@@ -109,19 +133,32 @@ public sealed class AppointmentsController : ControllerBase
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
-                var resp = new AppointmentResponse
+                // ✅ Trả về đầy đủ thông tin
+                var resp = new
                 {
                     AppointmentId = entity.AppointmentId,
                     Code = entity.Code,
-                    PatientId = entity.PatientId,
-                    DoctorId = entity.DoctorId,
-                    ServiceId = entity.ServiceId,
+                    Status = entity.Status,
+                    QueueNo = entity.QueueNo,
+                    CreatedAt = entity.CreatedAt,
+
+                    // Lịch hẹn
                     VisitDate = entity.VisitDate,
                     VisitTime = entity.VisitTime,
                     Reason = entity.Reason,
-                    Status = entity.Status,
-                    QueueNo = entity.QueueNo,
-                    CreatedAt = entity.CreatedAt
+
+                    // Bệnh nhân
+                    PatientId = entity.PatientId,
+                    PatientName = patient.FullName,
+                    PatientPhone = patient.Phone,
+
+                    // Bác sĩ
+                    DoctorId = entity.DoctorId,
+                    DoctorName = doctorInfo.DoctorName,
+
+                    // Dịch vụ
+                    ServiceId = entity.ServiceId,
+                    ServiceName = serviceName
                 };
 
                 result = Ok(new { success = true, message = "Tạo lịch thành công", data = resp });
@@ -136,59 +173,36 @@ public sealed class AppointmentsController : ControllerBase
         });
     }
 
-
-    // GET: xem STT kế tiếp (preview)
-    // [HttpGet("next-queue")]
-    // [Authorize(Roles = "PATIENT,EMPLOYEE,ADMIN")]
-    // [SwaggerOperation(Summary = "Tạo lịch khám bệnh", Description = "Bệnh nhân có thể đặt lịch khám. Nhân viên đặt lịch cho bệnh nhân ở CMS", Tags = new[] { "Appointments" })]
-    // [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    // [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
-    // [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
-    // public async Task<IActionResult> GetNextQueue([FromQuery] int doctorId, [FromQuery] DateOnly date, CancellationToken ct)
-    // {
-    //     if (!await _db.Doctors.AnyAsync(d => d.DoctorId == doctorId, ct))
-    //         return BadRequest(new { success = false, message = "Bác sĩ không tồn tại." });
-
-    //     var maxQueue = await _db.Appointments
-    //         .Where(a => a.DoctorId == doctorId && a.VisitDate == date && a.QueueNo != null)
-    //         .MaxAsync(a => (int?)a.QueueNo!, ct) ?? 0;
-
-    //     return Ok(new { success = true, data = new { nextQueue = maxQueue + 1 } });
-    // }
-
     // GET: danh sách lịch theo ngày/bác sĩ (phục vụ UI)
     [HttpGet]
     [Authorize(Roles = "DOCTOR,EMPLOYEE,ADMIN")]
     [SwaggerOperation(
-    Summary = "Danh sách lịch khám",
-    Description = "Dùng chung cho UI danh sách chờ khám và danh sách bệnh nhân hôm nay",
-    Tags = new[] { "Appointments" })]
+        Summary = "Danh sách lịch khám",
+        Description = "Dùng chung cho UI danh sách chờ khám và danh sách bệnh nhân hôm nay",
+        Tags = new[] { "Appointments" })]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> List(
-    [FromQuery] DateOnly? date,
-    [FromQuery] int? doctorId,
-    [FromQuery] string? q,          // tìm kiếm chung
-    [FromQuery] int page = 1,
-    [FromQuery] int limit = 20,
-    CancellationToken ct = default)
+        [FromQuery] DateOnly? date,
+        [FromQuery] int? doctorId,
+        [FromQuery] string? q,
+        [FromQuery] int page = 1,
+        [FromQuery] int limit = 20,
+        CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 200);
 
-        // Mặc định: hôm nay
         var today = DateOnly.FromDateTime(DateTime.Now.Date);
         var theDate = date ?? today;
 
-        // Nếu là bác sĩ và không truyền doctorId -> lấy từ claim
         if (!doctorId.HasValue && User.IsInRole("DOCTOR"))
         {
             var docIdStr = User.FindFirst("doctor_id")?.Value;
             if (int.TryParse(docIdStr, out var did)) doctorId = did;
         }
 
-        // Base query + include đủ dữ liệu hiển thị
         var query = _db.Appointments
             .AsNoTracking()
             .Where(a => a.VisitDate == theDate);
@@ -196,7 +210,6 @@ public sealed class AppointmentsController : ControllerBase
         if (doctorId.HasValue)
             query = query.Where(a => a.DoctorId == doctorId.Value);
 
-        // Tìm kiếm (tên BN, SĐT, mã hồ sơ, tên bác sĩ, tên dịch vụ)
         if (!string.IsNullOrWhiteSpace(q))
         {
             var kw = q.Trim().ToLower();
@@ -211,7 +224,6 @@ public sealed class AppointmentsController : ControllerBase
 
         var total = await query.CountAsync(ct);
 
-        // Sắp xếp theo giờ khám -> STT
         var items = await query
             .OrderBy(a => a.VisitTime)
             .ThenBy(a => a.QueueNo)
@@ -219,23 +231,16 @@ public sealed class AppointmentsController : ControllerBase
             .Take(limit)
             .Select(a => new
             {
-                // chung
                 a.AppointmentId,
-                a.Code,                // BN0001...
-                a.Status,              // waiting / booked / done / cancelled / no_show
-                a.QueueNo,             // STT trong ngày theo bác sĩ
-                a.CreatedAt,           // thời điểm đặt lịch
-
-                // lịch hẹn
+                a.Code,
+                a.Status,
+                a.QueueNo,
+                a.CreatedAt,
                 a.VisitDate,
                 a.VisitTime,
-
-                // bệnh nhân
                 a.PatientId,
                 PatientName = a.Patient.FullName,
                 PatientPhone = a.Patient.Phone,
-
-                // bác sĩ & dịch vụ
                 a.DoctorId,
                 DoctorName = a.Doctor.User != null ? a.Doctor.User.FullName : $"BS #{a.DoctorId}",
                 a.ServiceId,
