@@ -34,7 +34,7 @@ public sealed class DoctorPatientsController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (doctorId <= 0)
-            return (0, "Tài khoản hiện tại không gắn với bác sĩ.");
+            return (0, "Không thể chọn lịch khám của bác sĩ khác!");
 
         return (doctorId, null);
     }
@@ -101,7 +101,12 @@ public sealed class DoctorPatientsController : ControllerBase
     {
         var items = await _db.Medicines
             .OrderBy(x => x.Name)
-            .Select(x => new { x.MedicineId, x.Name, x.Unit })
+            .Select(x => new
+            {
+                MedicineId = x.MedicineId,  // ✅ Đúng tên cột
+                Name = x.Name,
+                Unit = x.Unit
+            })
             .ToListAsync();
 
         return ApiOk(items);
@@ -188,8 +193,13 @@ public sealed class DoctorPatientsController : ControllerBase
     public async Task<IActionResult> CreateLabOrder([FromBody] LabOrderReq req)
     {
         if (req.AppointmentId <= 0) return Bad("Thiếu hoặc sai AppointmentId.");
-        if (req.TestIds == null || req.TestIds.Count == 0) return Bad("Vui lòng chọn ít nhất 1 xét nghiệm.");
-        if (req.Priority is not ("normal" or "urgent")) return Bad("Giá trị 'Priority' không hợp lệ (normal|urgent).");
+
+        // ✅ Cho phép KHÔNG có TestIds nếu có Note
+        if ((req.TestIds == null || req.TestIds.Count == 0) && string.IsNullOrWhiteSpace(req.Note))
+            return Bad("Vui lòng chọn ít nhất 1 xét nghiệm HOẶC ghi rõ lý do không xét nghiệm.");
+
+        if (req.Priority is not ("normal" or "urgent"))
+            return Bad("Giá trị 'Priority' không hợp lệ (normal|urgent).");
 
         var (doctorId, err) = await GetDoctorIdAsync();
         if (err != null) return ForbidApi(err);
@@ -205,6 +215,16 @@ public sealed class DoctorPatientsController : ControllerBase
             .FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
 
         if (enc == null) return Bad("Chưa có Encounter. Vui lòng lưu chẩn đoán trước khi chỉ định xét nghiệm.");
+
+        // ✅ Nếu không có xét nghiệm, chỉ lưu ghi chú vào Encounter
+        if (req.TestIds == null || req.TestIds.Count == 0)
+        {
+            // Có thể lưu Note vào Encounter hoặc một bảng khác
+            // Ví dụ: thêm field LabNote vào Encounter
+            // enc.LabNote = req.Note?.Trim();
+            await _db.SaveChangesAsync();
+            return ApiOk(null, "Đã ghi nhận không có xét nghiệm.");
+        }
 
         // Kiểm tra test id hợp lệ
         var validTests = await _db.LabTests
@@ -238,7 +258,7 @@ public sealed class DoctorPatientsController : ControllerBase
             {
                 LabOrderId = order.LabOrderId,
                 TestName = t.Name,
-                ResultValue = "-",       // chưa có
+                ResultValue = "-",
                 Unit = "",
                 ReferenceText = "",
                 Note = "",
@@ -287,7 +307,7 @@ public sealed class DoctorPatientsController : ControllerBase
 
         if (enc == null) return Bad("Chưa có Encounter. Vui lòng lưu chẩn đoán trước khi kê toa.");
 
-        // validate thuốc tồn tại
+        // Validate thuốc tồn tại
         var medIds = req.Lines.Select(x => x.MedicineId).Distinct().ToList();
         var existedMeds = await _db.Medicines.Where(m => medIds.Contains(m.MedicineId))
                             .Select(m => m.MedicineId).ToListAsync();
@@ -296,31 +316,47 @@ public sealed class DoctorPatientsController : ControllerBase
 
         using var tx = await _db.Database.BeginTransactionAsync();
 
+        // ✅ Tạo prescription với đầy đủ thông tin
+        var now = DateTime.UtcNow;
+        var prescriptionCode = $"RX{now:yyMMddHHmmssfff}"; // Tạo mã unique
+
         var rx = new EncounterPrescription
         {
             EncounterId = enc.EncounterId,
-            Advice = string.IsNullOrWhiteSpace(req.Advice) ? null : req.Advice!.Trim()
+            Code = prescriptionCode,  // ✅ Set Code để tránh constraint
+            Advice = string.IsNullOrWhiteSpace(req.Advice) ? null : req.Advice!.Trim(),
+            CreatedAt = now,          // ✅ Set CreatedAt
+            ExpiryAt = now.AddMonths(3), // ✅ Toa thuốc hết hạn sau 3 tháng (tuỳ quy định)
+            ErxCode = null,           // ✅ Chưa có e-prescription
+            ErxStatus = null,
+            Warning = null
         };
         _db.EncounterPrescriptions.Add(rx);
         await _db.SaveChangesAsync();
 
+        // ✅ Thêm items
         foreach (var line in req.Lines)
         {
-            _db.PrescriptionItems.Add(new PrescriptionItem
+            var item = new PrescriptionItem
             {
                 PrescriptionId = rx.PrescriptionId,
                 MedicineId = line.MedicineId,
+                CustomName = null,  // Có thể để null nếu dùng Medicine
                 DoseText = line.Dose.Trim(),
                 FrequencyText = line.Frequency.Trim(),
                 DurationText = line.Duration.Trim(),
-                Note = string.IsNullOrWhiteSpace(line.Note) ? null : line.Note!.Trim()
-            });
+                Note = string.IsNullOrWhiteSpace(line.Note) ? null : line.Note!.Trim(),
+                Quantity = null,    // ✅ Có thể tính sau
+                UnitPrice = null,   // ✅ Có thể lấy từ Medicine nếu cần
+                CreatedAt = now     // ✅ Set CreatedAt
+            };
+            _db.PrescriptionItems.Add(item);
         }
 
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
 
-        return ApiOk(new { rx.PrescriptionId }, "Đã lưu toa thuốc.");
+        return ApiOk(new { rx.PrescriptionId, rx.Code }, "Đã lưu toa thuốc.");
     }
 
     // ========= 5) Hoàn tất khám =========
