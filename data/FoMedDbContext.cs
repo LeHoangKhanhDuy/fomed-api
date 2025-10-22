@@ -276,10 +276,15 @@ public class FoMedContext : DbContext
         {
             e.HasOne(x => x.Encounter).WithMany(x => x.Prescriptions)
              .HasForeignKey(x => x.EncounterId);
+            e.Property(x => x.Advice).HasMaxLength(1000);
         });
 
         m.Entity<PrescriptionItem>(e =>
         {
+            e.Property(x => x.DoseText).HasMaxLength(100).IsRequired();
+            e.Property(x => x.FrequencyText).HasMaxLength(100).IsRequired();
+            e.Property(x => x.DurationText).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Note).HasMaxLength(300);
             e.HasOne(x => x.Prescription).WithMany(x => x.Items).HasForeignKey(x => x.PrescriptionId);
             e.HasOne(x => x.Medicine).WithMany(x => x.PrescriptionItems).HasForeignKey(x => x.MedicineId);
         });

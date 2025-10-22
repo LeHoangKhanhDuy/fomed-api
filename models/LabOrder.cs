@@ -6,6 +6,7 @@ public class LabOrder
     public long LabOrderId { get; set; }
     public string Code { get; set; } = null!;
     public long PatientId { get; set; }
+    public long EncounterId { get; set; }
     public int? DoctorId { get; set; }
     public int ServiceId { get; set; }
     public DateTime SampleTakenAt { get; set; }
