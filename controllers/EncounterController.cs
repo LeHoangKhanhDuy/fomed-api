@@ -69,7 +69,7 @@ public class EncounterController : ControllerBase
             {
                 Code = string.IsNullOrWhiteSpace(e.Code) ? ("HSFM-" + e.EncounterId) : e.Code!,
                 VisitAt = e.CreatedAt,
-                DoctorName = e.Doctor.FullName,
+                DoctorName = e.Doctor.User!.FullName,
                 ServiceName = e.Service != null ? e.Service.Name : "",
                 Status = e.Status
             })
@@ -129,7 +129,7 @@ public class EncounterController : ControllerBase
                 ErxStatus = e.Prescriptions.OrderByDescending(p => p.CreatedAt).Select(p => p.ErxStatus).FirstOrDefault(),
 
                 // Doctor
-                DoctorName = e.Doctor.FullName,
+                DoctorName = e.Doctor.User!.FullName,
                 LicenseNo = e.Doctor.LicenseNo,
                 ServiceName = e.Service != null ? e.Service.Name : null,
                 SpecialtyName = e.Doctor.PrimarySpecialty != null ? e.Doctor.PrimarySpecialty.Name : null,

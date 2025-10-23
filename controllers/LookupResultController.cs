@@ -68,7 +68,7 @@ public sealed class LookupResultController : ControllerBase
             {
                 EncounterCode = e.Code!,
                 VisitAt = e.CreatedAt,
-                DoctorName = e.Doctor.FullName,
+                DoctorName = e.Doctor.User!.FullName,
                 ServiceName = e.Service != null ? e.Service.Name : null,
                 Status = e.Status,
                 // header bệnh nhân (ẩn bớt nếu cần)
@@ -164,7 +164,7 @@ public sealed class LookupResultController : ControllerBase
             {
                 Code = e.Code ?? ("HSFM-" + e.EncounterId),
                 VisitAt = e.CreatedAt,
-                DoctorName = e.Doctor != null ? e.Doctor.FullName : "—",
+                DoctorName = e.Doctor != null ? e.Doctor.User!.FullName : "—",
                 ServiceName = e.Service != null ? e.Service.Name : null,
                 Status = e.Status
             })

@@ -6,7 +6,7 @@ public class Doctor
 {
     [Key]
     public int DoctorId { get; set; }
-    public string FullName { get; set; } = default!;
+    public long UserId { get; set; }
     public string? LicenseNo { get; set; }
     public string? Title { get; set; }
     public int? PrimarySpecialtyId { get; set; }
@@ -18,10 +18,9 @@ public class Doctor
     public decimal RatingAvg { get; set; }
     public int RatingCount { get; set; }
     public string? RoomName { get; set; }
-    public bool IsActive { get; set; } = true;
+    public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
-    public long? UserId { get; set; }
 
     public virtual Specialty? PrimarySpecialty { get; set; }
     public virtual User? User { get; set; }

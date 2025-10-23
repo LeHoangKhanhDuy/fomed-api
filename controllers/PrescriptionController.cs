@@ -85,7 +85,7 @@ public class PrescriptionController : ControllerBase
             {
                 Code = p.Code ?? ("DTFM-" + p.PrescriptionId),
                 PrescribedAt = p.CreatedAt,
-                DoctorName = p.Encounter.Doctor.FullName,
+                DoctorName = p.Encounter.Doctor.User!.FullName,
                 Diagnosis = p.Encounter.DiagnosisText
             })
             .ToListAsync(ct);
@@ -134,7 +134,7 @@ public class PrescriptionController : ControllerBase
             {
                 Code = string.IsNullOrWhiteSpace(p.Code) ? "DTFM-" + p.PrescriptionId : p.Code!,
                 PrescribedAt = p.CreatedAt,
-                DoctorName = p.Encounter.Doctor.FullName,
+                DoctorName = p.Encounter.Doctor.User!.FullName,
                 Diagnosis = p.Encounter.DiagnosisText ?? "(Chưa có)",
                 Advice = p.Advice,
                 Warning = p.Warning,
