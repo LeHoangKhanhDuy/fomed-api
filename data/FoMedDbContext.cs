@@ -172,14 +172,18 @@ public class FoMedContext : DbContext
         {
             e.HasIndex(x => x.Email);
             e.HasIndex(x => x.Phone);
-            e.HasOne(u => u.Profile).WithOne(p => p.User)
-             .HasForeignKey<UserProfile>(p => p.UserId)
-             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(u => u.FullName).HasMaxLength(100).IsRequired();
+            e.HasOne(u => u.Profile)
+            .WithOne(p => p.User)
+            .HasForeignKey<UserProfile>(p => p.UserId)
+            .OnDelete(DeleteBehavior.Cascade)
+            .IsRequired();
         });
 
         m.Entity<UserProfile>(e =>
         {
             e.HasKey(p => p.UserId);
+            e.Property(p => p.AvatarUrl).HasMaxLength(500);
         });
 
         m.Entity<UserRole>(e =>

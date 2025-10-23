@@ -21,5 +21,5 @@ public class User
     public virtual ICollection<UserSession> Sessions { get; set; } = new List<UserSession>();
     public virtual ICollection<UserExternalLogin> ExternalLogins { get; set; } = new List<UserExternalLogin>();
     public virtual UserMfa? Mfa { get; set; }
-    public UserProfile? Profile { get; set; }
+    public virtual UserProfile Profile { get; set; } = null!;
 }

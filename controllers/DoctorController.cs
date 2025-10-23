@@ -15,48 +15,51 @@ public class DoctorsController : ControllerBase
     /* ================== DANH SÁCH BÁC SĨ (phân trang) ================== */
     [HttpGet]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Danh sách bác sĩ (phân trang)",
-        Description = "Trả về danh sách rút gọn để render list.",
-        Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> GetDoctors(
-        [FromQuery] int page = 1,
-        [FromQuery(Name = "limit")] int limit = 10,
-        [FromQuery] int? specialtyId = null,   // tùy chọn: lọc theo chuyên khoa
-        CancellationToken ct = default)
+    [SwaggerOperation(Summary = "Danh sách bác sĩ công khai", Tags = new[] { "Doctors" })]
+    public async Task<ActionResult> GetDoctors(
+    [FromQuery] int page = 1,
+    [FromQuery] int limit = 20,
+    CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 100);
 
-        var q = _db.Doctors.AsNoTracking().Where(d => d.IsActive);
+        const string DOCTOR_ROLE_CODE = "DOCTOR";
 
-        if (specialtyId.HasValue && specialtyId > 0)
-            q = q.Where(d => d.PrimarySpecialtyId == specialtyId.Value);
+        var query = _db.Doctors
+            .AsNoTracking()
+            .Where(d => d.IsActive && d.User != null) //  kiểm tra User
+            .Include(d => d.User!)
+                .ThenInclude(u => u.Profile)
+            .Include(d => d.User!)
+                .ThenInclude(u => u.UserRoles!)
+                    .ThenInclude(ur => ur.Role!)
+            .Include(d => d.PrimarySpecialty)
+            .Where(d => d.User!.UserRoles.Any(ur => ur.Role.Code == DOCTOR_ROLE_CODE));
 
-        var total = await q.CountAsync(ct);
+        var total = await query.CountAsync(ct);
 
-        var items = await q
-            .OrderBy(d => d.DoctorId) // hiển thị từ id nhỏ -> lớn
+        var items = await query
+            .OrderBy(d => d.User!.FullName)
             .Skip((page - 1) * limit)
             .Take(limit)
             .Select(d => new DoctorListItemDto
             {
                 DoctorId = d.DoctorId,
-                FullName = d.FullName,
+                FullName = d.User!.FullName,
                 Title = d.Title,
-                PrimarySpecialtyName = d.PrimarySpecialtyId != null ? d.PrimarySpecialty!.Name : null,
-                RoomName = d.RoomName,
+                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
+                RoomName = d.RoomName,  
                 ExperienceYears = d.ExperienceYears,
                 RatingAvg = d.RatingAvg,
                 RatingCount = d.RatingCount,
-                AvatarUrl = d.AvatarUrl
+                AvatarUrl = d.User.Profile!.AvatarUrl
             })
             .ToListAsync(ct);
 
         return Ok(new
         {
             success = true,
-            message = "OK",
             data = new
             {
                 page,
@@ -77,15 +80,23 @@ public class DoctorsController : ControllerBase
         Tags = new[] { "Doctors" })]
     public async Task<IActionResult> GetDoctorDetail([FromRoute] int id, CancellationToken ct = default)
     {
-        var dto = await _db.Doctors.AsNoTracking()
+        var dto = await _db.Doctors
+            .AsNoTracking()
             .Where(d => d.IsActive && d.DoctorId == id)
+            .Include(d => d.User!)
+                .ThenInclude(u => u.Profile!)
+            .Include(d => d.PrimarySpecialty)
+            .Include(d => d.Educations)
+            .Include(d => d.Expertises)
+            .Include(d => d.Achievements)
+            .Include(d => d.WeeklySlots)
             .Select(d => new DoctorDetailDto
             {
                 DoctorId = d.DoctorId,
-                FullName = d.FullName,
+                FullName = d.User!.FullName,
                 Title = d.Title,
                 LicenseNo = d.LicenseNo,
-                PrimarySpecialtyName = d.PrimarySpecialtyId != null ? d.PrimarySpecialty!.Name : null,
+                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
                 RoomName = d.RoomName,
                 ExperienceYears = d.ExperienceYears,
                 ExperienceNote = d.ExperienceNote,
@@ -93,34 +104,40 @@ public class DoctorsController : ControllerBase
                 VisitCount = d.VisitCount,
                 RatingAvg = d.RatingAvg,
                 RatingCount = d.RatingCount,
-                AvatarUrl = d.AvatarUrl,
+                AvatarUrl = d.User.Profile!.AvatarUrl,
 
                 Educations = d.Educations
-                    .OrderBy(e => e.SortOrder).ThenBy(e => e.EducationId)
+                    .OrderBy(e => e.SortOrder)
+                    .ThenBy(e => e.EducationId)
                     .Select(e => new DoctorEducationDto
                     {
                         YearFrom = e.YearFrom,
                         YearTo = e.YearTo,
-                        Title = e.Title,
+                        Title = e.Title ?? string.Empty,
                         Detail = e.Detail
                     }).ToList(),
 
                 Expertises = d.Expertises
-                    .OrderBy(e => e.SortOrder).ThenBy(e => e.ExpertiseId)
-                    .Select(e => new DoctorExpertiseDto { Content = e.Content })
-                    .ToList(),
+                    .OrderBy(e => e.SortOrder)
+                    .ThenBy(e => e.ExpertiseId)
+                    .Select(e => new DoctorExpertiseDto
+                    {
+                        Content = e.Content ?? string.Empty
+                    }).ToList(),
 
                 Achievements = d.Achievements
-                    .OrderBy(e => e.SortOrder).ThenBy(e => e.AchievementId)
+                    .OrderBy(a => a.SortOrder)
+                    .ThenBy(a => a.AchievementId)
                     .Select(a => new DoctorAchievementDto
                     {
                         YearLabel = a.YearLabel,
-                        Content = a.Content
+                        Content = a.Content ?? string.Empty
                     }).ToList(),
 
                 WeeklySlots = d.WeeklySlots
                     .Where(s => s.IsActive)
-                    .OrderBy(s => s.Weekday).ThenBy(s => s.StartTime)
+                    .OrderBy(s => s.Weekday)
+                    .ThenBy(s => s.StartTime)
                     .Select(s => new DoctorWeeklySlotDto
                     {
                         Weekday = s.Weekday,
