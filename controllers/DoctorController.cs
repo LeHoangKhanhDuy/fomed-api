@@ -321,6 +321,7 @@ public class DoctorsController : ControllerBase
     }
 
     /* ================== Tạo hồ sơ bác sĩ mới   ================== */
+    /* ================== Tạo hồ sơ bác sĩ mới   ================== */
     [HttpPost("admin/create")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
@@ -328,7 +329,6 @@ public class DoctorsController : ControllerBase
         Summary = "Tạo hồ sơ bác sĩ",
         Description = "Tạo hồ sơ chuyên môn cho User có role DOCTOR.",
         Tags = new[] { "Doctors" })]
-
     public async Task<IActionResult> CreateDoctorProfile(
         [FromBody] CreateDoctorProfileRequest req,
         CancellationToken ct = default)
@@ -396,13 +396,13 @@ public class DoctorsController : ControllerBase
         var doctor = new Doctor
         {
             UserId = req.UserId,
-            Title = req.Title?.Trim(),
+            Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim(),
             PrimarySpecialtyId = req.PrimarySpecialtyId,
-            LicenseNo = req.LicenseNo?.Trim(),
-            RoomName = req.RoomName?.Trim(),
-            ExperienceYears = req.ExperienceYears ?? 0,
-            ExperienceNote = req.ExperienceNote?.Trim(),
-            Intro = req.Intro?.Trim(),
+            LicenseNo = string.IsNullOrWhiteSpace(req.LicenseNo) ? null : req.LicenseNo.Trim(),
+            RoomName = string.IsNullOrWhiteSpace(req.RoomName) ? null : req.RoomName.Trim(),
+            ExperienceYears = req.ExperienceYears, // ✅ SỬA TẠI ĐÂY - xóa ?? 0
+            ExperienceNote = string.IsNullOrWhiteSpace(req.ExperienceNote) ? null : req.ExperienceNote.Trim(),
+            Intro = string.IsNullOrWhiteSpace(req.Intro) ? null : req.Intro.Trim(),
             IsActive = true,
             RatingAvg = 0,
             RatingCount = 0,
@@ -412,7 +412,24 @@ public class DoctorsController : ControllerBase
         };
 
         _db.Doctors.Add(doctor);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Log lỗi chi tiết
+            Console.WriteLine($"DbUpdateException: {ex.Message}");
+            Console.WriteLine($"InnerException: {ex.InnerException?.Message}");
+
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Không thể lưu hồ sơ bác sĩ vào database.",
+                error = ex.InnerException?.Message ?? ex.Message
+            });
+        }
 
         return Ok(new
         {
