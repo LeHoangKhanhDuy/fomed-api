@@ -53,7 +53,33 @@ public class DoctorsController : ControllerBase
                 ExperienceYears = d.ExperienceYears,
                 RatingAvg = d.RatingAvg,
                 RatingCount = d.RatingCount,
-                AvatarUrl = d.User.Profile!.AvatarUrl
+                AvatarUrl = d.User.Profile!.AvatarUrl,
+                Intro = d.Intro,
+                Educations = d.Educations
+                .OrderBy(e => e.SortOrder)
+                .ThenBy(e => e.EducationId)
+                .Select(e => new DoctorEducationDto
+                {
+                    YearFrom = e.YearFrom,
+                    YearTo = e.YearTo,
+                    Title = e.Title ?? string.Empty,
+                    Detail = e.Detail
+                }).ToList(),
+                Expertises = d.Expertises
+                .OrderBy(e => e.SortOrder)
+                .ThenBy(e => e.ExpertiseId)
+                .Select(e => new DoctorExpertiseDto
+                {
+                    Content = e.Content ?? string.Empty
+                }).ToList(),
+                Achievements = d.Achievements
+                .OrderBy(a => a.SortOrder)
+                .ThenBy(a => a.AchievementId)
+                .Select(a => new DoctorAchievementDto
+                {
+                    YearLabel = a.YearLabel,
+                    Content = a.Content ?? string.Empty
+                }).ToList(),
             })
             .ToListAsync(ct);
 
@@ -321,17 +347,16 @@ public class DoctorsController : ControllerBase
     }
 
     /* ================== Tạo hồ sơ bác sĩ mới   ================== */
-    /* ================== Tạo hồ sơ bác sĩ mới   ================== */
     [HttpPost("admin/create")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
     [SwaggerOperation(
-        Summary = "Tạo hồ sơ bác sĩ",
-        Description = "Tạo hồ sơ chuyên môn cho User có role DOCTOR.",
-        Tags = new[] { "Doctors" })]
+    Summary = "Tạo hồ sơ bác sĩ",
+    Description = "Tạo hồ sơ chuyên môn cho User có role DOCTOR.",
+    Tags = new[] { "Doctors" })]
     public async Task<IActionResult> CreateDoctorProfile(
-        [FromBody] CreateDoctorProfileRequest req,
-        CancellationToken ct = default)
+    [FromBody] CreateDoctorProfileRequest req,
+    CancellationToken ct = default)
     {
         // Validate request
         if (req.UserId <= 0)
@@ -368,27 +393,22 @@ public class DoctorsController : ControllerBase
                 return BadRequest(new { success = false, message = "Chuyên khoa không tồn tại." });
         }
 
-        // Validate Title
+        // Validate Title, LicenseNo, RoomName, ExperienceYears, ExperienceNote, Intro
         if (!string.IsNullOrWhiteSpace(req.Title) && req.Title.Length > 50)
             return BadRequest(new { success = false, message = "Học hàm không được vượt quá 50 ký tự." });
 
-        // Validate LicenseNo
         if (!string.IsNullOrWhiteSpace(req.LicenseNo) && req.LicenseNo.Length > 50)
             return BadRequest(new { success = false, message = "Số chứng chỉ hành nghề không được vượt quá 50 ký tự." });
 
-        // Validate RoomName
         if (!string.IsNullOrWhiteSpace(req.RoomName) && req.RoomName.Length > 100)
             return BadRequest(new { success = false, message = "Tên phòng khám không được vượt quá 100 ký tự." });
 
-        // Validate ExperienceYears
         if (req.ExperienceYears.HasValue && (req.ExperienceYears.Value < 0 || req.ExperienceYears.Value > 100))
             return BadRequest(new { success = false, message = "Số năm kinh nghiệm phải từ 0 đến 100." });
 
-        // Validate ExperienceNote
         if (!string.IsNullOrWhiteSpace(req.ExperienceNote) && req.ExperienceNote.Length > 500)
             return BadRequest(new { success = false, message = "Ghi chú kinh nghiệm không được vượt quá 500 ký tự." });
 
-        // Validate Intro
         if (!string.IsNullOrWhiteSpace(req.Intro) && req.Intro.Length > 2000)
             return BadRequest(new { success = false, message = "Giới thiệu không được vượt quá 2000 ký tự." });
 
@@ -400,7 +420,7 @@ public class DoctorsController : ControllerBase
             PrimarySpecialtyId = req.PrimarySpecialtyId,
             LicenseNo = string.IsNullOrWhiteSpace(req.LicenseNo) ? null : req.LicenseNo.Trim(),
             RoomName = string.IsNullOrWhiteSpace(req.RoomName) ? null : req.RoomName.Trim(),
-            ExperienceYears = req.ExperienceYears, // ✅ SỬA TẠI ĐÂY - xóa ?? 0
+            ExperienceYears = req.ExperienceYears,
             ExperienceNote = string.IsNullOrWhiteSpace(req.ExperienceNote) ? null : req.ExperienceNote.Trim(),
             Intro = string.IsNullOrWhiteSpace(req.Intro) ? null : req.Intro.Trim(),
             IsActive = true,
@@ -416,13 +436,56 @@ public class DoctorsController : ControllerBase
         try
         {
             await _db.SaveChangesAsync(ct);
+
+            // Create Học vấn, Chuyên môn, Thành tựu nếu có
+            if (req.Educations != null && req.Educations.Any())
+            {
+                foreach (var edu in req.Educations)
+                {
+                    var education = new DoctorEducation
+                    {
+                        DoctorId = doctor.DoctorId,
+                        YearFrom = edu.YearFrom.HasValue ? (short?)edu.YearFrom.Value : null,
+                        YearTo = edu.YearTo.HasValue ? (short?)edu.YearTo.Value : null,
+                        Title = edu.Title,
+                        Detail = edu.Detail
+                    };
+                    _db.DoctorEducations.Add(education); // Thêm vào bảng Học vấn
+                }
+            }
+
+            if (req.Expertises != null && req.Expertises.Any())
+            {
+                foreach (var expertise in req.Expertises)
+                {
+                    var expertiseEntity = new DoctorExpertise
+                    {
+                        DoctorId = doctor.DoctorId,
+                        Content = expertise.Content
+                    };
+                    _db.DoctorExpertises.Add(expertiseEntity); // Thêm vào bảng Chuyên môn
+                }
+            }
+
+            if (req.Achievements != null && req.Achievements.Any())
+            {
+                foreach (var achievement in req.Achievements)
+                {
+                    var achievementEntity = new DoctorAchievement
+                    {
+                        DoctorId = doctor.DoctorId,
+                        YearLabel = achievement.YearLabel,
+                        Content = achievement.Content
+                    };
+                    _db.DoctorAchievements.Add(achievementEntity); // Thêm vào bảng Thành tựu
+                }
+            }
+
+            // Lưu các thay đổi mới vào cơ sở dữ liệu
+            await _db.SaveChangesAsync(ct);
         }
         catch (DbUpdateException ex)
         {
-            // Log lỗi chi tiết
-            Console.WriteLine($"DbUpdateException: {ex.Message}");
-            Console.WriteLine($"InnerException: {ex.InnerException?.Message}");
-
             return StatusCode(500, new
             {
                 success = false,
@@ -439,60 +502,23 @@ public class DoctorsController : ControllerBase
         });
     }
 
+
     // Cập nhật hồ sơ bác sĩ
     [HttpPut("admin/{id:int}")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Cập nhật hồ sơ bác sĩ",
-        Description = "Cập nhật thông tin chuyên môn của bác sĩ.",
-        Tags = new[] { "Doctors" })]
+    [SwaggerOperation(Summary = "Cập nhật hồ sơ bác sĩ", Description = "Cập nhật thông tin chuyên môn của bác sĩ.", Tags = new[] { "Doctors" })]
     public async Task<IActionResult> UpdateDoctorProfile(
-        [FromRoute] int id,
-        [FromBody] UpdateDoctorProfileRequest req,
-        CancellationToken ct = default)
+    [FromRoute] int id,
+    [FromBody] UpdateDoctorProfileRequest req,
+    CancellationToken ct = default)
     {
-        // Check Doctor exists
         var doctor = await _db.Doctors.FindAsync(new object[] { id }, ct);
 
         if (doctor == null)
             return NotFound(new { success = false, message = "Không tìm thấy bác sĩ với ID này." });
 
-        // Validate PrimarySpecialty if provided
-        if (req.PrimarySpecialtyId.HasValue && req.PrimarySpecialtyId.Value > 0)
-        {
-            var specialtyExists = await _db.Specialties
-                .AnyAsync(s => s.SpecialtyId == req.PrimarySpecialtyId.Value, ct);
-
-            if (!specialtyExists)
-                return BadRequest(new { success = false, message = "Chuyên khoa không tồn tại." });
-        }
-
-        // Validate Title
-        if (req.Title != null && req.Title.Length > 50)
-            return BadRequest(new { success = false, message = "Học hàm không được vượt quá 50 ký tự." });
-
-        // Validate LicenseNo
-        if (req.LicenseNo != null && req.LicenseNo.Length > 50)
-            return BadRequest(new { success = false, message = "Số chứng chỉ hành nghề không được vượt quá 50 ký tự." });
-
-        // Validate RoomName
-        if (req.RoomName != null && req.RoomName.Length > 100)
-            return BadRequest(new { success = false, message = "Tên phòng khám không được vượt quá 100 ký tự." });
-
-        // Validate ExperienceYears
-        if (req.ExperienceYears.HasValue && (req.ExperienceYears.Value < 0 || req.ExperienceYears.Value > 100))
-            return BadRequest(new { success = false, message = "Số năm kinh nghiệm phải từ 0 đến 100." });
-
-        // Validate ExperienceNote
-        if (req.ExperienceNote != null && req.ExperienceNote.Length > 500)
-            return BadRequest(new { success = false, message = "Ghi chú kinh nghiệm không được vượt quá 500 ký tự." });
-
-        // Validate Intro
-        if (req.Intro != null && req.Intro.Length > 2000)
-            return BadRequest(new { success = false, message = "Giới thiệu không được vượt quá 2000 ký tự." });
-
-        // Update fields (chỉ update nếu không null)
+        // Cập nhật các thông tin bác sĩ
         if (req.Title != null)
             doctor.Title = req.Title.Trim();
 
@@ -517,9 +543,60 @@ public class DoctorsController : ControllerBase
         if (req.IsActive.HasValue)
             doctor.IsActive = req.IsActive.Value;
 
+        // Cập nhật thông tin Học vấn, Chuyên môn, Thành tựu
+        _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == doctor.DoctorId));
+        _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(e => e.DoctorId == doctor.DoctorId));
+        _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(a => a.DoctorId == doctor.DoctorId));
+
+        foreach (var edu in req.Educations)
+        {
+            var education = new DoctorEducation
+            {
+                DoctorId = doctor.DoctorId,
+                YearFrom = edu.YearFrom.HasValue ? (short?)edu.YearFrom.Value : null,
+                YearTo = edu.YearTo.HasValue ? (short?)edu.YearTo.Value : null,
+                Title = edu.Title,
+                Detail = edu.Detail
+            };
+            _db.DoctorEducations.Add(education);
+        }
+
+        foreach (var expertise in req.Expertises)
+        {
+            var expertiseEntity = new DoctorExpertise
+            {
+                DoctorId = doctor.DoctorId,
+                Content = expertise.Content
+            };
+            _db.DoctorExpertises.Add(expertiseEntity);
+        }
+
+        foreach (var achievement in req.Achievements)
+        {
+            var achievementEntity = new DoctorAchievement
+            {
+                DoctorId = doctor.DoctorId,
+                YearLabel = achievement.YearLabel,
+                Content = achievement.Content
+            };
+            _db.DoctorAchievements.Add(achievementEntity);
+        }
+
         doctor.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            return StatusCode(500, new
+            {
+                success = false,
+                message = "Không thể lưu hồ sơ bác sĩ vào database.",
+                error = ex.InnerException?.Message ?? ex.Message
+            });
+        }
 
         return Ok(new
         {
@@ -527,6 +604,7 @@ public class DoctorsController : ControllerBase
             message = "Cập nhật hồ sơ bác sĩ thành công."
         });
     }
+
 
     //Vô hiệu hóa hồ sơ bác sĩ
     [HttpDelete("admin/{id:int}")]
@@ -592,5 +670,5 @@ public class DoctorsController : ControllerBase
         });
     }
 
-    
+
 }

@@ -1,3 +1,5 @@
+using FoMed.Api.Models;
+
 public sealed class DoctorListItemDto
 {
     public int DoctorId { get; init; }
@@ -9,25 +11,37 @@ public sealed class DoctorListItemDto
     public decimal RatingAvg { get; init; }
     public int RatingCount { get; init; }
     public string? AvatarUrl { get; init; }
+    public string? Intro { get; set; }
+    public List<DoctorEducationDto> Educations { get; init; } = new(); 
+    public List<DoctorExpertiseDto> Expertises { get; init; } = new(); 
+    public List<DoctorAchievementDto> Achievements { get; init; } = new();
 }
 
 public sealed class DoctorEducationDto
 {
-    public int? YearFrom { get; init; }
-    public int? YearTo { get; init; }
-    public string Title { get; init; } = string.Empty;
-    public string? Detail { get; init; }
+    public int DoctorEducationId { get; set; }
+    public int DoctorId { get; set; }
+    public int? YearFrom { get; set; }
+    public int? YearTo { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Detail { get; set; }
+    public Doctor? Doctor { get; set; }
 }
 
 public sealed class DoctorAchievementDto
 {
-    public string? YearLabel { get; init; }
-    public string Content { get; init; } = string.Empty;
+    public int DoctorAchievementId { get; set; }
+    public int DoctorId { get; set; }
+    public string? YearLabel { get; set; }
+    public string Content { get; set; } = string.Empty;
 }
 
 public sealed class DoctorExpertiseDto
 {
-    public string Content { get; init; } = string.Empty;
+    public int DoctorExpertiseId { get; set; }
+    public int DoctorId { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public Doctor? Doctor { get; set; }
 }
 
 public sealed class DoctorWeeklySlotDto

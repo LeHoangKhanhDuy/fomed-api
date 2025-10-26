@@ -11,10 +11,10 @@ namespace FoMed.Api.Features.Doctor.Workspace;
 [ApiController]
 [Route("api/doctor-workspace")]
 [Authorize(Roles = "DOCTOR")]
-public sealed class DoctorPatientsController : ControllerBase
+public sealed class DoctorWorkspaceController : ControllerBase
 {
     private readonly FoMedContext _db;
-    public DoctorPatientsController(FoMedContext db) => _db = db;
+    public DoctorWorkspaceController(FoMedContext db) => _db = db;
 
     // ========= Helpers =========
 
