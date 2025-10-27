@@ -10,6 +10,10 @@ public class DoctorsController : ControllerBase
 {
     private readonly FoMedContext _db;
     public DoctorsController(FoMedContext db) => _db = db;
+    private const string DOCTOR_ROLE_CODE = "DOCTOR";
+    private static readonly string[] AllowedExt = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+    private static readonly string[] AllowedMime = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    private const long MaxFileSize = 5L * 1024 * 1024; // 5MB
 
     /* ================== DANH SÁCH BÁC SĨ CÔNG KHAI ================== */
     [HttpGet]
@@ -24,22 +28,14 @@ public class DoctorsController : ControllerBase
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 100);
 
-        const string DOCTOR_ROLE_CODE = "DOCTOR";
+        var baseQuery = _db.Doctors.AsNoTracking()
+            .Where(d => d.IsActive
+                        && d.User != null
+                        && _db.UserRoles.Any(ur => ur.UserId == d.UserId && ur.Role.Code == DOCTOR_ROLE_CODE));
 
-        var query = _db.Doctors
-            .AsNoTracking()
-            .Where(d => d.IsActive && d.User != null)
-            .Include(d => d.User!)
-                .ThenInclude(u => u.Profile)
-            .Include(d => d.User!)
-                .ThenInclude(u => u.UserRoles!)
-                    .ThenInclude(ur => ur.Role!)
-            .Include(d => d.PrimarySpecialty)
-            .Where(d => d.User!.UserRoles.Any(ur => ur.Role.Code == DOCTOR_ROLE_CODE));
+        var total = await baseQuery.CountAsync(ct);
 
-        var total = await query.CountAsync(ct);
-
-        var items = await query
+        var items = await baseQuery
             .OrderBy(d => d.User!.FullName)
             .Skip((page - 1) * limit)
             .Take(limit)
@@ -48,38 +44,42 @@ public class DoctorsController : ControllerBase
                 DoctorId = d.DoctorId,
                 FullName = d.User!.FullName,
                 Title = d.Title,
-                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
+                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty!.Name : null,
                 RoomName = d.RoomName,
                 ExperienceYears = d.ExperienceYears,
                 RatingAvg = d.RatingAvg,
                 RatingCount = d.RatingCount,
-                AvatarUrl = d.User.Profile!.AvatarUrl,
+                // avatar override -> fallback profile
+                AvatarUrl = d.AvatarUrl ?? d.User!.Profile!.AvatarUrl,
                 Intro = d.Intro,
                 Educations = d.Educations
-                .OrderBy(e => e.SortOrder)
-                .ThenBy(e => e.EducationId)
-                .Select(e => new DoctorEducationDto
-                {
-                    YearFrom = e.YearFrom,
-                    YearTo = e.YearTo,
-                    Title = e.Title ?? string.Empty,
-                    Detail = e.Detail
-                }).ToList(),
+                    .OrderBy(e => e.SortOrder).ThenBy(e => e.EducationId)
+                    .Select(e => new DoctorEducationDto
+                    {
+                        DoctorEducationId = e.EducationId,
+                        DoctorId = e.DoctorId,
+                        YearFrom = e.YearFrom,
+                        YearTo = e.YearTo,
+                        Title = e.Title ?? string.Empty,
+                        Detail = e.Detail
+                    }).ToList(),
                 Expertises = d.Expertises
-                .OrderBy(e => e.SortOrder)
-                .ThenBy(e => e.ExpertiseId)
-                .Select(e => new DoctorExpertiseDto
-                {
-                    Content = e.Content ?? string.Empty
-                }).ToList(),
+                    .OrderBy(e => e.SortOrder).ThenBy(e => e.ExpertiseId)
+                    .Select(e => new DoctorExpertiseDto
+                    {
+                        DoctorExpertiseId = e.ExpertiseId,
+                        DoctorId = e.DoctorId,
+                        Content = e.Content ?? string.Empty
+                    }).ToList(),
                 Achievements = d.Achievements
-                .OrderBy(a => a.SortOrder)
-                .ThenBy(a => a.AchievementId)
-                .Select(a => new DoctorAchievementDto
-                {
-                    YearLabel = a.YearLabel,
-                    Content = a.Content ?? string.Empty
-                }).ToList(),
+                    .OrderBy(a => a.SortOrder).ThenBy(a => a.AchievementId)
+                    .Select(a => new DoctorAchievementDto
+                    {
+                        DoctorAchievementId = a.AchievementId,
+                        DoctorId = a.DoctorId,
+                        YearLabel = a.YearLabel,
+                        Content = a.Content ?? string.Empty
+                    }).ToList(),
             })
             .ToListAsync(ct);
 
@@ -107,23 +107,15 @@ public class DoctorsController : ControllerBase
         Tags = new[] { "Doctors" })]
     public async Task<IActionResult> GetDoctorDetail([FromRoute] int id, CancellationToken ct = default)
     {
-        var dto = await _db.Doctors
-            .AsNoTracking()
+        var dto = await _db.Doctors.AsNoTracking()
             .Where(d => d.IsActive && d.DoctorId == id)
-            .Include(d => d.User!)
-                .ThenInclude(u => u.Profile!)
-            .Include(d => d.PrimarySpecialty)
-            .Include(d => d.Educations)
-            .Include(d => d.Expertises)
-            .Include(d => d.Achievements)
-            .Include(d => d.WeeklySlots)
             .Select(d => new DoctorDetailDto
             {
                 DoctorId = d.DoctorId,
                 FullName = d.User!.FullName,
                 Title = d.Title,
                 LicenseNo = d.LicenseNo,
-                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
+                PrimarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty!.Name : null,
                 RoomName = d.RoomName,
                 ExperienceYears = d.ExperienceYears,
                 ExperienceNote = d.ExperienceNote,
@@ -131,13 +123,14 @@ public class DoctorsController : ControllerBase
                 VisitCount = d.VisitCount,
                 RatingAvg = d.RatingAvg,
                 RatingCount = d.RatingCount,
-                AvatarUrl = d.User.Profile!.AvatarUrl,
+                AvatarUrl = d.AvatarUrl ?? d.User!.Profile!.AvatarUrl,
 
                 Educations = d.Educations
-                    .OrderBy(e => e.SortOrder)
-                    .ThenBy(e => e.EducationId)
+                    .OrderBy(e => e.SortOrder).ThenBy(e => e.EducationId)
                     .Select(e => new DoctorEducationDto
                     {
+                        DoctorEducationId = e.EducationId,
+                        DoctorId = e.DoctorId,
                         YearFrom = e.YearFrom,
                         YearTo = e.YearTo,
                         Title = e.Title ?? string.Empty,
@@ -145,26 +138,27 @@ public class DoctorsController : ControllerBase
                     }).ToList(),
 
                 Expertises = d.Expertises
-                    .OrderBy(e => e.SortOrder)
-                    .ThenBy(e => e.ExpertiseId)
+                    .OrderBy(e => e.SortOrder).ThenBy(e => e.ExpertiseId)
                     .Select(e => new DoctorExpertiseDto
                     {
+                        DoctorExpertiseId = e.ExpertiseId,
+                        DoctorId = e.DoctorId,
                         Content = e.Content ?? string.Empty
                     }).ToList(),
 
                 Achievements = d.Achievements
-                    .OrderBy(a => a.SortOrder)
-                    .ThenBy(a => a.AchievementId)
+                    .OrderBy(a => a.SortOrder).ThenBy(a => a.AchievementId)
                     .Select(a => new DoctorAchievementDto
                     {
+                        DoctorAchievementId = a.AchievementId,
+                        DoctorId = a.DoctorId,
                         YearLabel = a.YearLabel,
                         Content = a.Content ?? string.Empty
                     }).ToList(),
 
                 WeeklySlots = d.WeeklySlots
                     .Where(s => s.IsActive)
-                    .OrderBy(s => s.Weekday)
-                    .ThenBy(s => s.StartTime)
+                    .OrderBy(s => s.Weekday).ThenBy(s => s.StartTime)
                     .Select(s => new DoctorWeeklySlotDto
                     {
                         Weekday = s.Weekday,
@@ -181,14 +175,11 @@ public class DoctorsController : ControllerBase
         return Ok(new { success = true, message = "Lấy thông tin thành công.", data = dto });
     }
 
-    /* ================== SỐ LƯỢNG ĐÁNH GIÁ CỦA BÁC SĨ  ================== */
+    /* ================== ĐÁNH GIÁ THEO BÁC SĨ ================== */
     [HttpGet("ratings/{id:int}")]
     [AllowAnonymous]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Danh sách đánh giá theo bác sĩ",
-        Description = "Phân trang các đánh giá.",
-        Tags = new[] { "Doctors" })]
+    [SwaggerOperation(Summary = "Danh sách đánh giá theo bác sĩ", Description = "Phân trang các đánh giá.", Tags = new[] { "Doctors" })]
     public async Task<IActionResult> GetDoctorRatings(
         [FromRoute] int id,
         [FromQuery] int page = 1,
@@ -228,25 +219,17 @@ public class DoctorsController : ControllerBase
         });
     }
 
-    /* ================== Lấy danh sách Users có role DOCTOR chưa có hồ sơ bác sĩ  ================== */
+    /* ================== USERS (ROLE DOCTOR) CHƯA CÓ HỒ SƠ ================== */
     [HttpGet("admin/available-users")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Danh sách User có role DOCTOR chưa có hồ sơ",
-        Description = "Dùng để chọn User khi tạo mới Doctor profile.",
-        Tags = new[] { "Doctors" })]
+    [SwaggerOperation(Summary = "User có role DOCTOR chưa có hồ sơ", Description = "Chọn User khi tạo mới Doctor.", Tags = new[] { "Doctors" })]
     public async Task<IActionResult> GetAvailableUsersForDoctor(CancellationToken ct = default)
     {
-        const string DOCTOR_ROLE_CODE = "DOCTOR";
-
-        var availableUsers = await _db.Users
-            .AsNoTracking()
-            .Where(u => u.IsActive)
-            .Include(u => u.UserRoles!)
-                .ThenInclude(ur => ur.Role!)
-            .Where(u => u.UserRoles.Any(ur => ur.Role.Code == DOCTOR_ROLE_CODE))
-            .Where(u => !_db.Doctors.Any(d => d.UserId == u.UserId))
+        var availableUsers = await _db.Users.AsNoTracking()
+            .Where(u => u.IsActive
+                        && _db.UserRoles.Any(ur => ur.UserId == u.UserId && ur.Role.Code == DOCTOR_ROLE_CODE)
+                        && !_db.Doctors.Any(d => d.UserId == u.UserId))
             .OrderBy(u => u.FullName)
             .Select(u => new
             {
@@ -254,8 +237,8 @@ public class DoctorsController : ControllerBase
                 fullName = u.FullName,
                 email = u.Email,
                 phone = u.Phone,
-                gender = u.Gender,
-                dateOfBirth = u.DateOfBirth
+                gender = u.Profile.Gender,
+                dateOfBirth = u.Profile.DateOfBirth
             })
             .ToListAsync(ct);
 
@@ -267,14 +250,11 @@ public class DoctorsController : ControllerBase
         });
     }
 
-    /* ================== Danh sách tất cả bác sĩ QUẢN TRỊ   ================== */
+    /* ================== DANH SÁCH BÁC SĨ (ADMIN) ================== */
     [HttpGet("admin/list")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Danh sách bác sĩ Quản trị",
-        Description = "Hiển thị tất cả bác sĩ kể cả inactive, dùng cho quản trị.",
-        Tags = new[] { "Doctors" })]
+    [SwaggerOperation(Summary = "Danh sách bác sĩ (Admin)", Description = "Gồm cả inactive.", Tags = new[] { "Doctors" })]
     public async Task<IActionResult> GetDoctorsForAdmin(
         [FromQuery] int page = 1,
         [FromQuery] int limit = 20,
@@ -285,22 +265,13 @@ public class DoctorsController : ControllerBase
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 100);
 
-        var query = _db.Doctors
-            .AsNoTracking()
-            .Include(d => d.User!)
-                .ThenInclude(u => u.Profile)
-            .Include(d => d.PrimarySpecialty)
-            .AsQueryable();
+        var query = _db.Doctors.AsNoTracking().AsQueryable();
 
-        // Filter by IsActive
-        if (isActive.HasValue)
-            query = query.Where(d => d.IsActive == isActive.Value);
-
-        // Search by name
+        if (isActive.HasValue) query = query.Where(d => d.IsActive == isActive.Value);
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var searchLower = search.ToLower();
-            query = query.Where(d => d.User!.FullName.ToLower().Contains(searchLower));
+            var q = search.ToLower();
+            query = query.Where(d => d.User!.FullName.ToLower().Contains(q));
         }
 
         var total = await query.CountAsync(ct);
@@ -314,15 +285,15 @@ public class DoctorsController : ControllerBase
                 doctorId = d.DoctorId,
                 userId = d.UserId,
                 fullName = d.User!.FullName,
-                email = d.User.Email,
-                phone = d.User.Phone,
+                email = d.User!.Email,
+                phone = d.User!.Phone,
                 title = d.Title,
-                primarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
+                primarySpecialtyName = d.PrimarySpecialty != null ? d.PrimarySpecialty!.Name : null,
                 licenseNo = d.LicenseNo,
                 roomName = d.RoomName,
                 experienceYears = d.ExperienceYears,
                 isActive = d.IsActive,
-                avatarUrl = d.User.Profile!.AvatarUrl,
+                avatarUrl = d.AvatarUrl ?? d.User!.Profile!.AvatarUrl,
                 ratingAvg = d.RatingAvg,
                 ratingCount = d.RatingCount,
                 visitCount = d.VisitCount,
@@ -346,73 +317,46 @@ public class DoctorsController : ControllerBase
         });
     }
 
-    /* ================== Tạo hồ sơ bác sĩ mới   ================== */
+    /* ================== TẠO HỒ SƠ BÁC SĨ ================== */
     [HttpPost("admin/create")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-    Summary = "Tạo hồ sơ bác sĩ",
-    Description = "Tạo hồ sơ chuyên môn cho User có role DOCTOR.",
-    Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> CreateDoctorProfile(
-    [FromBody] CreateDoctorProfileRequest req,
-    CancellationToken ct = default)
+    [SwaggerOperation(Summary = "Tạo hồ sơ bác sĩ", Description = "Cho user có role DOCTOR.", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> CreateDoctorProfile([FromBody] CreateDoctorProfileRequest req, CancellationToken ct = default)
     {
-        // Validate request
         if (req.UserId <= 0)
             return BadRequest(new { success = false, message = "UserId không hợp lệ." });
 
-        // Check User exists and is active
         var user = await _db.Users
-            .Include(u => u.UserRoles!)
-                .ThenInclude(ur => ur.Role!)
+            .Include(u => u.UserRoles!).ThenInclude(ur => ur.Role!)
             .FirstOrDefaultAsync(u => u.UserId == req.UserId, ct);
 
-        if (user == null)
-            return NotFound(new { success = false, message = "Không tìm thấy User với ID này." });
-
-        if (!user.IsActive)
-            return BadRequest(new { success = false, message = "User này đã bị vô hiệu hóa, không thể tạo hồ sơ bác sĩ." });
-
-        // Check User has DOCTOR role
-        const string DOCTOR_ROLE_CODE = "DOCTOR";
+        if (user == null) return NotFound(new { success = false, message = "Không tìm thấy User." });
+        if (!user.IsActive) return BadRequest(new { success = false, message = "User đang bị vô hiệu hóa." });
         if (!user.UserRoles.Any(ur => ur.Role.Code == DOCTOR_ROLE_CODE))
-            return BadRequest(new { success = false, message = "User này không có quyền DOCTOR." });
-
-        // Check if Doctor profile already exists
+            return BadRequest(new { success = false, message = "User không có quyền DOCTOR." });
         if (await _db.Doctors.AnyAsync(d => d.UserId == req.UserId, ct))
-            return Conflict(new { success = false, message = "User này đã có hồ sơ bác sĩ rồi." });
+            return Conflict(new { success = false, message = "User đã có hồ sơ bác sĩ." });
 
-        // Validate PrimarySpecialty if provided
-        if (req.PrimarySpecialtyId.HasValue && req.PrimarySpecialtyId.Value > 0)
+        if (req.PrimarySpecialtyId is > 0)
         {
-            var specialtyExists = await _db.Specialties
-                .AnyAsync(s => s.SpecialtyId == req.PrimarySpecialtyId.Value, ct);
-
-            if (!specialtyExists)
-                return BadRequest(new { success = false, message = "Chuyên khoa không tồn tại." });
+            var ok = await _db.Specialties.AnyAsync(s => s.SpecialtyId == req.PrimarySpecialtyId, ct);
+            if (!ok) return BadRequest(new { success = false, message = "Chuyên khoa không tồn tại." });
         }
 
-        // Validate Title, LicenseNo, RoomName, ExperienceYears, ExperienceNote, Intro
-        if (!string.IsNullOrWhiteSpace(req.Title) && req.Title.Length > 50)
-            return BadRequest(new { success = false, message = "Học hàm không được vượt quá 50 ký tự." });
-
+        if (!string.IsNullOrWhiteSpace(req.Title) && req.Title.Length > 100)
+            return BadRequest(new { success = false, message = "Học hàm không được vượt quá 100 ký tự." });
         if (!string.IsNullOrWhiteSpace(req.LicenseNo) && req.LicenseNo.Length > 50)
-            return BadRequest(new { success = false, message = "Số chứng chỉ hành nghề không được vượt quá 50 ký tự." });
-
+            return BadRequest(new { success = false, message = "Số CCHN không được vượt quá 50 ký tự." });
         if (!string.IsNullOrWhiteSpace(req.RoomName) && req.RoomName.Length > 100)
-            return BadRequest(new { success = false, message = "Tên phòng khám không được vượt quá 100 ký tự." });
-
-        if (req.ExperienceYears.HasValue && (req.ExperienceYears.Value < 0 || req.ExperienceYears.Value > 100))
-            return BadRequest(new { success = false, message = "Số năm kinh nghiệm phải từ 0 đến 100." });
-
+            return BadRequest(new { success = false, message = "Tên phòng không được vượt quá 100 ký tự." });
+        if (req.ExperienceYears is < 0 or > 100)
+            return BadRequest(new { success = false, message = "Năm kinh nghiệm phải từ 0–100." });
         if (!string.IsNullOrWhiteSpace(req.ExperienceNote) && req.ExperienceNote.Length > 500)
-            return BadRequest(new { success = false, message = "Ghi chú kinh nghiệm không được vượt quá 500 ký tự." });
-
+            return BadRequest(new { success = false, message = "Ghi chú kinh nghiệm tối đa 500 ký tự." });
         if (!string.IsNullOrWhiteSpace(req.Intro) && req.Intro.Length > 2000)
-            return BadRequest(new { success = false, message = "Giới thiệu không được vượt quá 2000 ký tự." });
+            return BadRequest(new { success = false, message = "Giới thiệu tối đa 2000 ký tự." });
 
-        // Create Doctor
         var doctor = new Doctor
         {
             UserId = req.UserId,
@@ -423,6 +367,7 @@ public class DoctorsController : ControllerBase
             ExperienceYears = req.ExperienceYears,
             ExperienceNote = string.IsNullOrWhiteSpace(req.ExperienceNote) ? null : req.ExperienceNote.Trim(),
             Intro = string.IsNullOrWhiteSpace(req.Intro) ? null : req.Intro.Trim(),
+            AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim(), // có thể set sẵn
             IsActive = true,
             RatingAvg = 0,
             RatingCount = 0,
@@ -432,243 +377,220 @@ public class DoctorsController : ControllerBase
         };
 
         _db.Doctors.Add(doctor);
+        await _db.SaveChangesAsync(ct);
 
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-
-            // Create Học vấn, Chuyên môn, Thành tựu nếu có
-            if (req.Educations != null && req.Educations.Any())
+        // Bulk insert edu/expertise/achievement (nếu có)
+        if (req.Educations?.Count > 0)
+            _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
             {
-                foreach (var edu in req.Educations)
-                {
-                    var education = new DoctorEducation
-                    {
-                        DoctorId = doctor.DoctorId,
-                        YearFrom = edu.YearFrom.HasValue ? (short?)edu.YearFrom.Value : null,
-                        YearTo = edu.YearTo.HasValue ? (short?)edu.YearTo.Value : null,
-                        Title = edu.Title,
-                        Detail = edu.Detail
-                    };
-                    _db.DoctorEducations.Add(education); // Thêm vào bảng Học vấn
-                }
-            }
-
-            if (req.Expertises != null && req.Expertises.Any())
+                DoctorId = doctor.DoctorId,
+                YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
+                YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
+                Title = e.Title,
+                Detail = e.Detail
+            }));
+        if (req.Expertises?.Count > 0)
+            _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
             {
-                foreach (var expertise in req.Expertises)
-                {
-                    var expertiseEntity = new DoctorExpertise
-                    {
-                        DoctorId = doctor.DoctorId,
-                        Content = expertise.Content
-                    };
-                    _db.DoctorExpertises.Add(expertiseEntity); // Thêm vào bảng Chuyên môn
-                }
-            }
-
-            if (req.Achievements != null && req.Achievements.Any())
+                DoctorId = doctor.DoctorId,
+                Content = x.Content
+            }));
+        if (req.Achievements?.Count > 0)
+            _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
             {
-                foreach (var achievement in req.Achievements)
-                {
-                    var achievementEntity = new DoctorAchievement
-                    {
-                        DoctorId = doctor.DoctorId,
-                        YearLabel = achievement.YearLabel,
-                        Content = achievement.Content
-                    };
-                    _db.DoctorAchievements.Add(achievementEntity); // Thêm vào bảng Thành tựu
-                }
-            }
+                DoctorId = doctor.DoctorId,
+                YearLabel = a.YearLabel,
+                Content = a.Content
+            }));
 
-            // Lưu các thay đổi mới vào cơ sở dữ liệu
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            return StatusCode(500, new
-            {
-                success = false,
-                message = "Không thể lưu hồ sơ bác sĩ vào database.",
-                error = ex.InnerException?.Message ?? ex.Message
-            });
-        }
+        await _db.SaveChangesAsync(ct);
 
-        return Ok(new
-        {
-            success = true,
-            message = "Tạo hồ sơ bác sĩ thành công.",
-            data = new { doctorId = doctor.DoctorId }
-        });
+        return Ok(new { success = true, message = "Tạo hồ sơ bác sĩ thành công.", data = new { doctorId = doctor.DoctorId } });
     }
 
-
-    // Cập nhật hồ sơ bác sĩ
+    /* ================== CẬP NHẬT HỒ SƠ BÁC SĨ ================== */
     [HttpPut("admin/{id:int}")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(Summary = "Cập nhật hồ sơ bác sĩ", Description = "Cập nhật thông tin chuyên môn của bác sĩ.", Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> UpdateDoctorProfile(
-    [FromRoute] int id,
-    [FromBody] UpdateDoctorProfileRequest req,
-    CancellationToken ct = default)
+    [SwaggerOperation(Summary = "Cập nhật hồ sơ bác sĩ", Description = "Cập nhật thông tin chuyên môn.", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> UpdateDoctorProfile([FromRoute] int id, [FromBody] UpdateDoctorProfileRequest req, CancellationToken ct = default)
     {
-        var doctor = await _db.Doctors.FindAsync(new object[] { id }, ct);
+        var doctor = await _db.Doctors.FirstOrDefaultAsync(d => d.DoctorId == id, ct);
+        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
 
-        if (doctor == null)
-            return NotFound(new { success = false, message = "Không tìm thấy bác sĩ với ID này." });
+        if (req.Title != null) doctor.Title = req.Title.Trim();
+        if (req.PrimarySpecialtyId.HasValue) doctor.PrimarySpecialtyId = req.PrimarySpecialtyId > 0 ? req.PrimarySpecialtyId : null;
+        if (req.LicenseNo != null) doctor.LicenseNo = req.LicenseNo.Trim();
+        if (req.RoomName != null) doctor.RoomName = req.RoomName.Trim();
+        if (req.ExperienceYears.HasValue) doctor.ExperienceYears = req.ExperienceYears.Value;
+        if (req.ExperienceNote != null) doctor.ExperienceNote = req.ExperienceNote.Trim();
+        if (req.Intro != null) doctor.Intro = req.Intro.Trim();
+        if (req.IsActive.HasValue) doctor.IsActive = req.IsActive.Value;
+        if (req.AvatarUrl != null) doctor.AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim();
 
-        // Cập nhật các thông tin bác sĩ
-        if (req.Title != null)
-            doctor.Title = req.Title.Trim();
+        // Replace child collections
+        _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == id));
+        _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(e => e.DoctorId == id));
+        _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(e => e.DoctorId == id));
 
-        if (req.PrimarySpecialtyId.HasValue)
-            doctor.PrimarySpecialtyId = req.PrimarySpecialtyId.Value > 0 ? req.PrimarySpecialtyId.Value : null;
-
-        if (req.LicenseNo != null)
-            doctor.LicenseNo = req.LicenseNo.Trim();
-
-        if (req.RoomName != null)
-            doctor.RoomName = req.RoomName.Trim();
-
-        if (req.ExperienceYears.HasValue)
-            doctor.ExperienceYears = req.ExperienceYears.Value;
-
-        if (req.ExperienceNote != null)
-            doctor.ExperienceNote = req.ExperienceNote.Trim();
-
-        if (req.Intro != null)
-            doctor.Intro = req.Intro.Trim();
-
-        if (req.IsActive.HasValue)
-            doctor.IsActive = req.IsActive.Value;
-
-        // Cập nhật thông tin Học vấn, Chuyên môn, Thành tựu
-        _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == doctor.DoctorId));
-        _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(e => e.DoctorId == doctor.DoctorId));
-        _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(a => a.DoctorId == doctor.DoctorId));
-
-        foreach (var edu in req.Educations)
-        {
-            var education = new DoctorEducation
+        if (req.Educations?.Count > 0)
+            _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
             {
-                DoctorId = doctor.DoctorId,
-                YearFrom = edu.YearFrom.HasValue ? (short?)edu.YearFrom.Value : null,
-                YearTo = edu.YearTo.HasValue ? (short?)edu.YearTo.Value : null,
-                Title = edu.Title,
-                Detail = edu.Detail
-            };
-            _db.DoctorEducations.Add(education);
-        }
-
-        foreach (var expertise in req.Expertises)
-        {
-            var expertiseEntity = new DoctorExpertise
+                DoctorId = id,
+                YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
+                YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
+                Title = e.Title,
+                Detail = e.Detail
+            }));
+        if (req.Expertises?.Count > 0)
+            _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
             {
-                DoctorId = doctor.DoctorId,
-                Content = expertise.Content
-            };
-            _db.DoctorExpertises.Add(expertiseEntity);
-        }
-
-        foreach (var achievement in req.Achievements)
-        {
-            var achievementEntity = new DoctorAchievement
+                DoctorId = id,
+                Content = x.Content
+            }));
+        if (req.Achievements?.Count > 0)
+            _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
             {
-                DoctorId = doctor.DoctorId,
-                YearLabel = achievement.YearLabel,
-                Content = achievement.Content
-            };
-            _db.DoctorAchievements.Add(achievementEntity);
-        }
+                DoctorId = id,
+                YearLabel = a.YearLabel,
+                Content = a.Content
+            }));
 
         doctor.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { success = true, message = "Cập nhật hồ sơ bác sĩ thành công." });
+    }
+
+    /* ================== UPLOAD ẢNH ĐẠI DIỆN (OVERRIDE) ================== */
+    [HttpPost("admin/{id:int}/upload-avatar")]
+    [Authorize(Roles = "ADMIN")]
+    [Produces("application/json")]
+    [SwaggerOperation(Summary = "Upload avatar bác sĩ", Description = "Lưu file vào wwwroot/uploads/doctors và set Doctor.AvatarUrl.", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> UploadDoctorAvatar([FromRoute] int id, IFormFile file, CancellationToken ct = default)
+    {
+        var doctor = await _db.Doctors.FirstOrDefaultAsync(d => d.DoctorId == id, ct);
+        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
+
+        if (file == null || file.Length == 0) return BadRequest(new { success = false, message = "Vui lòng chọn file ảnh." });
+        if (file.Length > MaxFileSize) return BadRequest(new { success = false, message = "Kích thước file tối đa 5MB." });
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AllowedExt.Contains(ext)) return BadRequest(new { success = false, message = "Chỉ chấp nhận: jpg, jpeg, png, gif, webp." });
+
+        var mime = file.ContentType.ToLowerInvariant();
+        if (!AllowedMime.Contains(mime)) return BadRequest(new { success = false, message = "Loại file không hợp lệ." });
+
+        var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "doctors");
+        if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+
+        // Xoá ảnh override cũ nếu có
+        if (!string.IsNullOrWhiteSpace(doctor.AvatarUrl))
+        {
+            var oldName = Path.GetFileName(doctor.AvatarUrl);
+            var oldPath = Path.Combine(uploadDir, oldName);
+            if (System.IO.File.Exists(oldPath))
+            {
+                try { System.IO.File.Delete(oldPath); } catch { /* ignore */ }
+            }
+        }
+
+        var unique = $"doctor_{id}_{Guid.NewGuid():N}{ext}";
+        var path = Path.Combine(uploadDir, unique);
+
+        await using (var stream = new FileStream(path, FileMode.Create))
+        {
+            await file.CopyToAsync(stream, ct);
+        }
+
+        doctor.AvatarUrl = $"/uploads/doctors/{unique}";
+        doctor.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        // Trả về avatar đã resolve
+        var resolved = doctor.AvatarUrl ?? (await _db.Users
+            .Where(u => u.UserId == doctor.UserId)
+            .Select(u => u.Profile.AvatarUrl)
+            .FirstOrDefaultAsync(ct));
+
+        return Ok(new
+        {
+            success = true,
+            message = "Upload ảnh đại diện thành công.",
+            data = new { doctorId = id, avatarUrl = resolved }
+        });
+    }
+
+    /* ================== XÓA ẢNH OVERRIDE CỦA BÁC SĨ (TRỞ VỀ FALLBACK) ================== */
+    [HttpDelete("admin/{id:int}/delete-avatar")]
+    [Authorize(Roles = "ADMIN")]
+    [Produces("application/json")]
+    [SwaggerOperation(Summary = "Xóa ảnh đại diện bác sĩ", Description = "Xóa ảnh override của bác sĩ (không xóa avatar profile).", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> DeleteDoctorAvatar([FromRoute] int id, CancellationToken ct = default)
+    {
+        var doctor = await _db.Doctors.FirstOrDefaultAsync(d => d.DoctorId == id, ct);
+        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
+
+        if (string.IsNullOrWhiteSpace(doctor.AvatarUrl))
+            return BadRequest(new { success = false, message = "Bác sĩ này không có ảnh override để xoá." });
 
         try
         {
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            return StatusCode(500, new
+            var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "doctors");
+            var name = Path.GetFileName(doctor.AvatarUrl);
+            var filePath = Path.Combine(uploadDir, name);
+            if (System.IO.File.Exists(filePath))
             {
-                success = false,
-                message = "Không thể lưu hồ sơ bác sĩ vào database.",
-                error = ex.InnerException?.Message ?? ex.Message
-            });
-        }
+                try { System.IO.File.Delete(filePath); } catch { /* ignore */ }
+            }
 
-        return Ok(new
+            doctor.AvatarUrl = null; // về fallback
+            doctor.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+
+            var fallback = await _db.Users.Where(u => u.UserId == doctor.UserId)
+                .Select(u => u.Profile.AvatarUrl).FirstOrDefaultAsync(ct);
+
+            return Ok(new { success = true, message = "Đã xoá ảnh override. Đang dùng ảnh profile (fallback).", data = new { doctorId = id, avatarUrl = fallback } });
+        }
+        catch (Exception ex)
         {
-            success = true,
-            message = "Cập nhật hồ sơ bác sĩ thành công."
-        });
+            return StatusCode(500, new { success = false, message = "Lỗi khi xóa ảnh.", error = ex.Message });
+        }
     }
 
-
-    //Vô hiệu hóa hồ sơ bác sĩ
+    /* ================== VÔ HIỆU HÓA / KÍCH HOẠT ================== */
     [HttpDelete("admin/{id:int}")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Vô hiệu hóa hồ sơ bác sĩ",
-        Description = "Đặt IsActive = false, bác sĩ sẽ không hiển thị công khai.",
-        Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> DeactivateDoctorProfile(
-        [FromRoute] int id,
-        CancellationToken ct = default)
+    [SwaggerOperation(Summary = "Vô hiệu hóa hồ sơ bác sĩ", Description = "IsActive = false.", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> DeactivateDoctorProfile([FromRoute] int id, CancellationToken ct = default)
     {
         var doctor = await _db.Doctors.FindAsync(new object[] { id }, ct);
-
-        if (doctor == null)
-            return NotFound(new { success = false, message = "Không tìm thấy bác sĩ với ID này." });
-
-        if (!doctor.IsActive)
-            return BadRequest(new { success = false, message = "Hồ sơ bác sĩ này đã bị vô hiệu hóa rồi." });
+        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
+        if (!doctor.IsActive) return BadRequest(new { success = false, message = "Đã vô hiệu hóa rồi." });
 
         doctor.IsActive = false;
         doctor.UpdatedAt = DateTime.UtcNow;
-
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new
-        {
-            success = true,
-            message = "Đã vô hiệu hóa hồ sơ bác sĩ thành công."
-        });
+        return Ok(new { success = true, message = "Đã vô hiệu hóa hồ sơ bác sĩ." });
     }
 
-    //Kích hoạt lại hồ sơ bác sĩ
     [HttpPatch("admin/{id:int}/activate")]
     [Authorize(Roles = "ADMIN")]
     [Produces("application/json")]
-    [SwaggerOperation(
-        Summary = "Kích hoạt lại hồ sơ bác sĩ",
-        Description = "Đặt IsActive = true, bác sĩ sẽ hiển thị công khai trở lại.",
-        Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> ActivateDoctorProfile(
-        [FromRoute] int id,
-        CancellationToken ct = default)
+    [SwaggerOperation(Summary = "Kích hoạt hồ sơ bác sĩ", Description = "IsActive = true.", Tags = new[] { "Doctors" })]
+    public async Task<IActionResult> ActivateDoctorProfile([FromRoute] int id, CancellationToken ct = default)
     {
         var doctor = await _db.Doctors.FindAsync(new object[] { id }, ct);
-
-        if (doctor == null)
-            return NotFound(new { success = false, message = "Không tìm thấy bác sĩ với ID này." });
-
-        if (doctor.IsActive)
-            return BadRequest(new { success = false, message = "Hồ sơ bác sĩ này đang hoạt động rồi." });
+        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
+        if (doctor.IsActive) return BadRequest(new { success = false, message = "Đang hoạt động rồi." });
 
         doctor.IsActive = true;
         doctor.UpdatedAt = DateTime.UtcNow;
-
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new
-        {
-            success = true,
-            message = "Đã kích hoạt hồ sơ bác sĩ thành công."
-        });
+        return Ok(new { success = true, message = "Đã kích hoạt hồ sơ bác sĩ." });
     }
-
-
 }

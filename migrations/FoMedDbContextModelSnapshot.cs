@@ -144,10 +144,6 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<short?>("ExperienceYears")
                         .HasColumnType("smallint");
 
-                    b.Property<string>("FullName")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Intro")
                         .HasColumnType("nvarchar(max)");
 
@@ -176,7 +172,7 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<long?>("UserId")
+                    b.Property<long>("UserId")
                         .HasColumnType("bigint");
 
                     b.Property<int>("VisitCount")
@@ -1302,13 +1298,16 @@ namespace FoMed_WebAPI.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("UserId"));
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateOnly?>("DateOfBirth")
                         .HasColumnType("date");
 
                     b.Property<string>("Email")
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<string>("FullName")
                         .IsRequired()
@@ -1319,7 +1318,9 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("nvarchar(1)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<byte[]>("PasswordHash")
                         .IsRequired()
@@ -1329,18 +1330,28 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("varbinary(max)");
 
                     b.Property<string>("Phone")
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.HasKey("UserId");
 
-                    b.HasIndex("Email");
+                    b.HasIndex("Email")
+                        .HasDatabaseName("IX_Users_Email");
 
-                    b.HasIndex("Phone");
+                    b.HasIndex("FullName");
 
-                    b.ToTable("Users");
+                    b.HasIndex("Phone")
+                        .HasDatabaseName("IX_Users_Phone");
+
+                    b.ToTable("Users", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Users_Gender", "([Gender] IN ('M','F') OR [Gender] IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.UserExternalLogin", b =>
@@ -1743,7 +1754,9 @@ namespace FoMed_WebAPI.Migrations
 
                     b.HasOne("FoMed.Api.Models.User", "User")
                         .WithMany()
-                        .HasForeignKey("UserId");
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("PrimarySpecialty");
 

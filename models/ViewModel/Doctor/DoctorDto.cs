@@ -19,7 +19,7 @@ public sealed class DoctorListItemDto
 
 public sealed class DoctorEducationDto
 {
-    public int DoctorEducationId { get; set; }
+    public long DoctorEducationId { get; set; }
     public int DoctorId { get; set; }
     public int? YearFrom { get; set; }
     public int? YearTo { get; set; }
@@ -30,7 +30,7 @@ public sealed class DoctorEducationDto
 
 public sealed class DoctorAchievementDto
 {
-    public int DoctorAchievementId { get; set; }
+    public long DoctorAchievementId { get; set; }
     public int DoctorId { get; set; }
     public string? YearLabel { get; set; }
     public string Content { get; set; } = string.Empty;
@@ -38,7 +38,7 @@ public sealed class DoctorAchievementDto
 
 public sealed class DoctorExpertiseDto
 {
-    public int DoctorExpertiseId { get; set; }
+    public long DoctorExpertiseId { get; set; }
     public int DoctorId { get; set; }
     public string Content { get; set; } = string.Empty;
     public Doctor? Doctor { get; set; }

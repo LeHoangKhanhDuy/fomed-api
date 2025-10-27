@@ -11,6 +11,7 @@ using FoMed.Api.Auth;
 using FoMed.Api.Models;
 using System.Text;
 using Microsoft.OpenApi.Any;
+using FoMed.Api;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -90,6 +91,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "FoMed API", Version = "v1" });
     c.EnableAnnotations();
+
     var jwtScheme = new OpenApiSecurityScheme
     {
         Scheme = "bearer",

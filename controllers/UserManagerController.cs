@@ -116,11 +116,13 @@ public class AdminController : ControllerBase
                 u.FullName,
                 u.Email,
                 u.Phone,
-                u.Gender,
-                u.DateOfBirth,
                 u.IsActive,
                 u.CreatedAt,
-                u.UpdatedAt,
+                gender = u.Profile!.Gender,
+                dateOfBirth = u.Profile!.DateOfBirth.HasValue
+                ? (DateTime?)u.Profile.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
+                : (DateTime?)null,
+
                 Roles = u.UserRoles.Select(r => r.Role.Code).ToArray(),
                 Profile = u.Profile != null ? new
                 {
@@ -129,6 +131,7 @@ public class AdminController : ControllerBase
                     u.Profile.Bio
                 } : null
             })
+
             .FirstOrDefaultAsync(ct);
 
         if (user == null)

@@ -9,8 +9,8 @@ public class User
     public string FullName { get; set; } = default!;
     public string? Email { get; set; }
     public string? Phone { get; set; }
-    public char? Gender { get; set; } // 'M'/'F'
-    public DateOnly? DateOfBirth { get; set; }
+    // public char? Gender { get; set; } // 'M'/'F'
+    // public DateOnly? DateOfBirth { get; set; }
     public byte[] PasswordHash { get; set; } = default!;
     public byte[]? PasswordSalt { get; set; }
     public bool IsActive { get; set; } = true;

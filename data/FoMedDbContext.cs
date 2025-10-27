@@ -132,8 +132,19 @@ public class FoMedContext : DbContext
         {
             e.Property(x => x.RatingAvg).HasColumnType("decimal(3,2)");
             e.Property(x => x.LicenseNo).HasMaxLength(50);
+            e.Property(x => x.Title).HasMaxLength(100);
+            e.Property(x => x.RoomName).HasMaxLength(50);
+            e.Property(x => x.AvatarUrl).HasMaxLength(500);
+
+            e.Property(x => x.CreatedAt).HasColumnType("datetime2(3)").HasDefaultValueSql("SYSUTCDATETIME()");
+            e.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)").HasDefaultValueSql("SYSUTCDATETIME()");
+            e.Property(x => x.IsActive).HasDefaultValue(true);
+
             e.HasOne(x => x.PrimarySpecialty).WithMany().HasForeignKey(x => x.PrimarySpecialtyId);
-            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+
+            // Tìm nhanh
+            e.HasIndex(x => new { x.IsActive, x.PrimarySpecialtyId });
         });
 
         m.Entity<DoctorSpecialty>(e =>
@@ -170,20 +181,53 @@ public class FoMedContext : DbContext
         // ---------- Users & Auth ----------
         m.Entity<User>(e =>
         {
-            e.HasIndex(x => x.Email);
-            e.HasIndex(x => x.Phone);
-            e.Property(u => u.FullName).HasMaxLength(100).IsRequired();
+            e.ToTable("Users");
+
+            e.HasIndex(x => x.FullName);
+            e.HasIndex(x => x.Email).HasDatabaseName("IX_Users_Email")
+                .IsUnique().HasFilter("[Email] IS NOT NULL");
+            e.HasIndex(x => x.Phone).HasDatabaseName("IX_Users_Phone")
+                .IsUnique().HasFilter("[Phone] IS NOT NULL");
+
+            e.Property(x => x.FullName).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Email).HasMaxLength(150);
+            e.Property(x => x.Phone).HasMaxLength(20);
+
+            e.Property(x => x.CreatedAt)
+                .HasColumnType("datetime2(3)")
+                .HasDefaultValueSql("SYSUTCDATETIME()");
+            e.Property(x => x.UpdatedAt)
+                .HasColumnType("datetime2(3)")
+                .HasDefaultValueSql("SYSUTCDATETIME()");
+            e.Property(x => x.IsActive).HasDefaultValue(true);
+
             e.HasOne(u => u.Profile)
-            .WithOne(p => p.User)
-            .HasForeignKey<UserProfile>(p => p.UserId)
-            .OnDelete(DeleteBehavior.Cascade)
-            .IsRequired();
+                .WithOne(p => p.User)
+                .HasForeignKey<UserProfile>(p => p.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
         });
+
 
         m.Entity<UserProfile>(e =>
         {
+            e.ToTable("UserProfiles", t =>
+            {
+                // Check constraint cho Gender
+                t.HasCheckConstraint("CK_UserProfiles_Gender", "([Gender] IN ('M','F') OR [Gender] IS NULL)");
+            });
+
             e.HasKey(p => p.UserId);
+
+            e.Property(p => p.DateOfBirth).HasColumnType("date");      // DateOnly -> date
+            e.Property(p => p.Gender).HasColumnType("char(1)");
             e.Property(p => p.AvatarUrl).HasMaxLength(500);
+            e.Property(p => p.Address).HasMaxLength(300);
+            e.Property(p => p.Bio).HasMaxLength(1000);
+
+            e.Property(p => p.UpdatedAt)
+                .HasColumnType("datetime2(3)")
+                .HasDefaultValueSql("SYSUTCDATETIME()");
         });
 
         m.Entity<UserRole>(e =>

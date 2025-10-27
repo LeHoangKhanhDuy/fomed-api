@@ -8,6 +8,7 @@ public class CreateDoctorProfileRequest
     public short? ExperienceYears { get; set; }
     public string? ExperienceNote { get; set; }
     public string? Intro { get; set; }
+    public string? AvatarUrl { get; set; }
     public List<DoctorEducationDto> Educations { get; set; } = new();
     public List<DoctorExpertiseDto> Expertises { get; set; } = new();
     public List<DoctorAchievementDto> Achievements { get; set; } = new();
@@ -23,6 +24,7 @@ public class UpdateDoctorProfileRequest
     public string? ExperienceNote { get; set; }
     public string? Intro { get; set; }
     public bool? IsActive { get; set; }
+    public string? AvatarUrl { get; set; }
     public List<DoctorEducationDto> Educations { get; set; } = new();
     public List<DoctorExpertiseDto> Expertises { get; set; } = new();
     public List<DoctorAchievementDto> Achievements { get; set; } = new();

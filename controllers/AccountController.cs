@@ -367,37 +367,53 @@ public class AccountsController : ControllerBase
         // --- Băm mật khẩu ---
         var (hash, salt) = PasswordHasher.Hash(req.Password);
 
-        // --- Tạo user (chưa lưu) ---
-        var user = new User
-        {
-            FullName = req.FullName.Trim(),
-            Email = email,
-            Phone = phone,
-            Gender = req.Gender,
-            PasswordHash = hash,
-            PasswordSalt = salt,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
         // Parse ngày sinh dd/MM/yyyy
+        DateOnly? dob = null;
         if (!string.IsNullOrWhiteSpace(req.DateOfBirth))
         {
-            if (DateTime.TryParseExact(
-                req.DateOfBirth,
-                "dd/MM/yyyy",
-                null,
-                System.Globalization.DateTimeStyles.None,
-                out var dob))
+            if (DateTime.TryParseExact(req.DateOfBirth, "dd/MM/yyyy", null,
+                System.Globalization.DateTimeStyles.None, out var dt))
             {
-                user.DateOfBirth = DateOnly.FromDateTime(dob);
+                dob = DateOnly.FromDateTime(dt);
             }
             else
             {
                 return BadRequest(ApiResponse<LoginTokenResponse>.Fail("Ngày sinh phải có dạng dd/MM/yyyy.", 400));
             }
         }
+
+        // Parse gender (chấp nhận 'M'/'F' hoặc "M"/"F")
+        char? gender = null;
+        if (req.Gender is not null)
+        {
+            var g = req.Gender.ToString()!.Trim().ToUpperInvariant();
+            if (g == "M" || g == "F") gender = g[0];
+        }
+
+        // --- Tạo user (chưa lưu) ---
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            FullName = req.FullName.Trim(),
+            Email = email,
+            Phone = phone,
+            PasswordHash = hash,
+            PasswordSalt = salt,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+
+            // tạo luôn profile vì quan hệ 1-1 là Required
+            Profile = new UserProfile
+            {
+                DateOfBirth = dob,
+                Gender = gender,
+                AvatarUrl = null,
+                Address = null,
+                Bio = null,
+                UpdatedAt = now
+            }
+        };
 
         // --- Gán role mặc định & lưu trong transaction ---
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -554,15 +570,15 @@ public class AccountsController : ControllerBase
                 name = u.FullName,
                 email = u.Email,
                 phone = u.Phone,
-                gender = u.Gender == null ? null : (u.Gender == 'M' ? "Male" : "Female"),
-                dateOfBirth = u.DateOfBirth.HasValue
-                    ? (DateTime?)u.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
+                gender = u.Profile!.Gender == null ? null : (u.Profile.Gender == 'M' ? "Male" : "Female"),
+                dateOfBirth = u.Profile!.DateOfBirth.HasValue
+                    ? (DateTime?)u.Profile.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
                     : (DateTime?)null,
                 createdAt = u.CreatedAt,
-                avatarUrl = u.Profile != null ? u.Profile.AvatarUrl : null,
-                address = u.Profile != null ? u.Profile.Address : null,
-                bio = u.Profile != null ? u.Profile.Bio : null,
-                profileUpdatedAt = u.Profile != null ? (DateTime?)u.Profile.UpdatedAt : (DateTime?)null
+                avatarUrl = u.Profile!.AvatarUrl,
+                address = u.Profile!.Address,
+                bio = u.Profile!.Bio,
+                profileUpdatedAt = (DateTime?)u.Profile!.UpdatedAt
             })
             .FirstOrDefaultAsync();
 
