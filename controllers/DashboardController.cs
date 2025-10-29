@@ -124,4 +124,60 @@ public class DashboardController : ControllerBase
 
         return Ok(res);
     }
+
+    [HttpGet("patients")]
+    [Produces("application/json")]
+    public async Task<IActionResult> GetPatientTotals(
+    [FromQuery] DateOnly? from,
+    [FromQuery] DateOnly? to,
+    CancellationToken ct = default)
+    {
+        // ===== Khung ngày mặc định: 30 ngày gần nhất (tính cả hôm nay) =====
+        var now = DateTime.Now;
+        var today = DateOnly.FromDateTime(now.Date);
+        var defaultFrom = today.AddDays(-29);
+        var fromDate = from ?? defaultFrom;
+        var toDate = to ?? today;
+
+        if (toDate < fromDate)
+            return BadRequest(new { success = false, message = "`to` phải >= `from`" });
+
+        // Ranh giới DateTime cho khoảng ngày (bao gồm ngày 'to')
+        var fromDt = fromDate.ToDateTime(TimeOnly.MinValue);           // 00:00:00
+        var toDtExclusive = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue); // < ngày+1
+
+        var q = _db.Patients.AsNoTracking();
+
+        // Tổng tất cả bệnh nhân (all-time)
+        var totalAll = await q.CountAsync(ct);
+
+        // Mới tạo trong khoảng ngày
+        var qInRange = q.Where(p => p.CreatedAt >= fromDt && p.CreatedAt < toDtExclusive);
+        var newInRange = await qInRange.CountAsync(ct);
+
+        // Mốc Today / ThisWeek (Mon-start) / ThisMonth
+        int dow = (int)now.DayOfWeek;                  // 0=Sun..6=Sat
+        int offsetToMonday = ((dow + 6) % 7);
+        var startOfToday = now.Date;
+        var startOfWeek = startOfToday.AddDays(-offsetToMonday);
+        var startOfMonth = new DateTime(startOfToday.Year, startOfToday.Month, 1);
+        var tomorrow = startOfToday.AddDays(1);
+
+        var newToday = await q.Where(p => p.CreatedAt >= startOfToday && p.CreatedAt < tomorrow).CountAsync(ct);
+        var newThisWeek = await q.Where(p => p.CreatedAt >= startOfWeek && p.CreatedAt < tomorrow).CountAsync(ct);
+        var newThisMonth = await q.Where(p => p.CreatedAt >= startOfMonth && p.CreatedAt < tomorrow).CountAsync(ct);
+
+        var res = new PatientTotalResponse(
+            Success: true,
+            From: fromDate.ToString("yyyy-MM-dd"),
+            To: toDate.ToString("yyyy-MM-dd"),
+            TotalAll: totalAll,
+            NewInRange: newInRange,
+            NewToday: newToday,
+            NewThisWeek: newThisWeek,
+            NewThisMonth: newThisMonth
+        );
+
+        return Ok(res);
+    }
 }
