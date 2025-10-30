@@ -540,7 +540,19 @@ public class AccountsController : ControllerBase
         if (string.IsNullOrWhiteSpace(token))
             return BadRequest(new { error = "Thiếu token." });
 
-        // Validate token
+        // ===== DÙNG CHUNG LOGIC VỚI GenerateJwt =====
+        // Lấy Jwt:Key dạng base64 và decode
+        var jwtKeyB64 = _cfg["Jwt:Key"]!;
+        byte[] jwtKeyBytes;
+        try
+        {
+            jwtKeyBytes = Convert.FromBase64String(jwtKeyB64);
+        }
+        catch
+        {
+            throw new InvalidOperationException("Jwt:Key must be BASE64");
+        }
+
         var tvp = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -549,7 +561,7 @@ public class AccountsController : ControllerBase
             ValidateLifetime = true,
             ValidIssuer = _cfg["Jwt:Issuer"],
             ValidAudience = _cfg["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
+            IssuerSigningKey = new SymmetricSecurityKey(jwtKeyBytes),
             ClockSkew = TimeSpan.FromMinutes(2)
         };
 
@@ -566,11 +578,12 @@ public class AccountsController : ControllerBase
         }
 
         // Lấy userId từ claims
-        var idStr = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("uid");
+        var idStr = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                   ?? principal.FindFirstValue("uid");
         if (!long.TryParse(idStr, out var userId))
             return Unauthorized(new { error = "Token không chứa user id." });
 
-        // Truy vấn dữ liệu - XỬ LÝ Profile NULL
+        // Truy vấn user + profile
         var user = await _db.Users
             .AsNoTracking()
             .Include(u => u.Profile)
@@ -582,12 +595,11 @@ public class AccountsController : ControllerBase
             return NotFound(new { error = "Không tìm thấy người dùng" });
         }
 
-        // Tạo UserProfile nếu chưa có 
+        // Nếu chưa có Profile thì tạo ngay và lưu DB
         if (user.Profile == null)
         {
             _logger.LogInformation("Creating missing UserProfile for UserId: {UserId}", userId);
 
-            // Tạo profile mới trong DB
             var newProfile = new UserProfile
             {
                 UserId = userId,
@@ -602,7 +614,7 @@ public class AccountsController : ControllerBase
             _db.UserProfiles.Add(newProfile);
             await _db.SaveChangesAsync();
 
-            user.Profile = newProfile; // Gán vào object đang dùng
+            user.Profile = newProfile;
         }
 
         var data = new
@@ -625,6 +637,7 @@ public class AccountsController : ControllerBase
         return Ok(new { message = "Get account profile successfully", data });
     }
 
+
     // ===== UPDATE PROFILE =====
     [HttpPost("update-profile")]
     [Consumes("application/json")]
@@ -642,7 +655,17 @@ public class AccountsController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Token))
             return BadRequest(new { success = false, message = "Thiếu token." });
 
-        // 2) Validate token
+        var jwtKeyB64 = _cfg["Jwt:Key"]!;
+        byte[] jwtKeyBytes;
+        try
+        {
+            jwtKeyBytes = Convert.FromBase64String(jwtKeyB64);
+        }
+        catch
+        {
+            throw new InvalidOperationException("Jwt:Key must be BASE64");
+        }
+        
         var tvp = new TokenValidationParameters
         {
             ValidateIssuer = true,
