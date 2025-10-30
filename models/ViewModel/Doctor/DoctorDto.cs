@@ -81,3 +81,4 @@ public sealed class DoctorRatingItemDto
     public string? Comment { get; init; }
     public DateTime CreatedAt { get; init; }
 }
+

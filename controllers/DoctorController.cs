@@ -593,4 +593,71 @@ public class DoctorsController : ControllerBase
 
         return Ok(new { success = true, message = "Đã kích hoạt hồ sơ bác sĩ." });
     }
+
+    [HttpGet("related/{doctorId:int}")]
+    [AllowAnonymous]
+    [Produces("application/json")]
+    public async Task<IActionResult> GetRelatedDoctors(
+    [FromRoute] int doctorId,
+    [FromQuery] int limit = 10,
+    CancellationToken ct = default)
+    {
+        // 1. Lấy bác sĩ gốc để biết chuyên khoa chính
+        var current = await _db.Doctors
+            .AsNoTracking()
+            .Include(d => d.PrimarySpecialty)
+            .Include(d => d.User)
+            .FirstOrDefaultAsync(d => d.DoctorId == doctorId, ct);
+
+        if (current == null)
+        {
+            return NotFound(new
+            {
+                success = false,
+                message = "Không tìm thấy bác sĩ."
+            });
+        }
+
+        var specialtyId = current.PrimarySpecialtyId;
+
+        if (specialtyId == null)
+        {
+            return Ok(new RelatedDoctorsResponse(
+                Success: true,
+                Data: new List<RelatedDoctorDto>()
+            ));
+        }
+
+        // 2. Query danh sách bác sĩ khác cùng chuyên khoa
+        var doctors = await _db.Doctors
+            .AsNoTracking()
+            .Include(d => d.PrimarySpecialty)
+            .Include(d => d.User)
+            .Where(d =>
+                d.DoctorId != doctorId &&
+                d.IsActive == true &&
+                d.PrimarySpecialtyId == specialtyId
+            )
+            .OrderByDescending(d => d.RatingAvg)
+            .ThenByDescending(d => d.RatingCount)
+            .Take(Math.Max(1, Math.Min(limit, 20)))
+            .Select(d => new RelatedDoctorDto(
+                d.DoctorId,
+                d.User != null ? d.User.FullName : null,
+                d.Title,
+                d.AvatarUrl,
+                d.PrimarySpecialtyId,
+                d.PrimarySpecialty != null ? d.PrimarySpecialty.Name : null,
+                d.ExperienceYears,
+                d.RatingAvg,
+                d.RatingCount,
+                d.RoomName
+            ))
+            .ToListAsync(ct);
+
+        return Ok(new RelatedDoctorsResponse(
+            Success: true,
+            Data: doctors
+        ));
+    }
 }
