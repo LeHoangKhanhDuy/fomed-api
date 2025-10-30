@@ -2,6 +2,7 @@ namespace FoMed.Api.ViewModel;
 
 public sealed class LoginTokenResponse
 {
+    public long UserId { get; set; }
     public string Token { get; set; } = string.Empty;         // access token (JWT)
     public DateTime ExpiresAt { get; set; }                   // access token expiry
     public string RefreshToken { get; set; } = string.Empty;  // refresh token

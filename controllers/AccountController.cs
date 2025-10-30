@@ -152,16 +152,27 @@ public class AccountsController : ControllerBase
 
     private (string token, DateTime expiresAt) GenerateJwt(User user, string[] roleCodes, IEnumerable<Claim>? extraClaims = null)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!));
+        var jwtKeyB64 = _cfg["Jwt:Key"]!;
+        byte[] jwtKeyBytes;
+        try
+        {
+            jwtKeyBytes = Convert.FromBase64String(jwtKeyB64);
+        }
+        catch
+        {
+            throw new InvalidOperationException("Jwt:Key must be BASE64");
+        }
+
+        var key = new SymmetricSecurityKey(jwtKeyBytes); 
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var expires = DateTime.UtcNow.AddMinutes(int.Parse(_cfg["Jwt:AccessMinutes"]!));
 
         var claims = new List<Claim>
-        {
-            new(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
-            new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
-            new(ClaimTypes.Name, user.FullName ?? string.Empty),
-        };
+    {
+        new(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
+        new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
+        new(ClaimTypes.Name, user.FullName ?? string.Empty),
+    };
 
         foreach (var rc in roleCodes)
         {
@@ -222,9 +233,6 @@ public class AccountsController : ControllerBase
         }
 
         // (3) Kiểm tra khoá tài khoản (tùy schema bạn có IsLocked / LockedUntil)
-        // Giả định 2 field phổ biến:
-        //   - bool IsLocked
-        //   - DateTime? LockedUntil (UTC)
         var isLocked = (bool)(user.GetType().GetProperty("IsLocked")?.GetValue(user) ?? false);
         var lockedUntil = (DateTime?)user.GetType().GetProperty("LockedUntil")?.GetValue(user);
 
@@ -263,6 +271,7 @@ public class AccountsController : ControllerBase
 
         var data = new LoginTokenResponse
         {
+            UserId = user.UserId,
             Token = accessToken,
             ExpiresAt = expiresAt,
             RefreshToken = refresh,
@@ -302,6 +311,7 @@ public class AccountsController : ControllerBase
 
         var data = new LoginTokenResponse
         {
+            UserId = user.UserId,
             Token = access,
             ExpiresAt = expiresAt,
             RefreshToken = session.RefreshToken,
