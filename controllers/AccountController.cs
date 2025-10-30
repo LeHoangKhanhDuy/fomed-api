@@ -49,24 +49,10 @@ public class AccountsController : ControllerBase
             {
                 case "DOCTOR":
                     {
-                        // Nếu Doctors.UserId là BIGINT -> giữ long; nếu là INT -> ép int
-                        int? doctorId = null;
-
-                        // thử map kiểu long trước
-                        doctorId = await _db.Doctors
-                            .Where(d => d.UserId == userId)            // nếu cột là bigint
+                        int? doctorId = await _db.Doctors
+                            .Where(d => d.UserId == userId || d.UserId == (int)userId)
                             .Select(d => (int?)d.DoctorId)
                             .FirstOrDefaultAsync();
-
-                        // nếu không có, thử cast xuống int (khi Doctors.UserId là INT)
-                        if (!doctorId.HasValue && userId >= int.MinValue && userId <= int.MaxValue)
-                        {
-                            int uidInt = (int)userId;
-                            doctorId = await _db.Doctors
-                                .Where(d => d.UserId == uidInt)         // nếu cột là int
-                                .Select(d => (int?)d.DoctorId)
-                                .FirstOrDefaultAsync();
-                        }
 
                         if (doctorId.HasValue)
                             extra.Add(new Claim("doctor_id", doctorId.Value.ToString()));
@@ -75,28 +61,15 @@ public class AccountsController : ControllerBase
 
                 case "PATIENT":
                     {
-                        // PatientId có thể là bigint/long — đổi qua string
                         long? patientId = await _db.Patients
-                            .Where(p => p.UserId == userId)             // nếu p.UserId là bigint
+                            .Where(p => p.UserId == userId || p.UserId == (int)userId)
                             .Select(p => (long?)p.PatientId)
                             .FirstOrDefaultAsync();
-
-                        if (!patientId.HasValue && userId >= int.MinValue && userId <= int.MaxValue)
-                        {
-                            int uidInt = (int)userId;
-                            patientId = await _db.Patients
-                                .Where(p => p.UserId == uidInt)         // nếu p.UserId là int
-                                .Select(p => (long?)p.PatientId)
-                                .FirstOrDefaultAsync();
-                        }
 
                         if (patientId.HasValue)
                             extra.Add(new Claim("patient_id", patientId.Value.ToString()));
                         break;
                     }
-
-                    // case "EMPLOYEE":
-                    //   BẬT LẠI khi có DbSet<Employees> trong FoMedContext
             }
         }
 
@@ -163,7 +136,7 @@ public class AccountsController : ControllerBase
             throw new InvalidOperationException("Jwt:Key must be BASE64");
         }
 
-        var key = new SymmetricSecurityKey(jwtKeyBytes); 
+        var key = new SymmetricSecurityKey(jwtKeyBytes);
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var expires = DateTime.UtcNow.AddMinutes(int.Parse(_cfg["Jwt:AccessMinutes"]!));
 
@@ -638,7 +611,6 @@ public class AccountsController : ControllerBase
     }
 
 
-    // ===== UPDATE PROFILE =====
     [HttpPost("update-profile")]
     [Consumes("application/json")]
     [Produces("application/json")]
@@ -655,6 +627,7 @@ public class AccountsController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Token))
             return BadRequest(new { success = false, message = "Thiếu token." });
 
+        // 2) Validate JWT token
         var jwtKeyB64 = _cfg["Jwt:Key"]!;
         byte[] jwtKeyBytes;
         try
@@ -665,16 +638,16 @@ public class AccountsController : ControllerBase
         {
             throw new InvalidOperationException("Jwt:Key must be BASE64");
         }
-        
+
         var tvp = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
             ValidIssuer = _cfg["Jwt:Issuer"],
             ValidAudience = _cfg["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                System.Text.Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
+            IssuerSigningKey = new SymmetricSecurityKey(jwtKeyBytes),
             ClockSkew = TimeSpan.Zero
         };
 
@@ -714,7 +687,6 @@ public class AccountsController : ControllerBase
         {
             var phoneToCheck = req.Phone.Trim();
 
-            // Chỉ check trùng nếu phone khác với phone hiện tại
             if (user.Phone != phoneToCheck)
             {
                 var existed = await _db.Users
@@ -729,24 +701,23 @@ public class AccountsController : ControllerBase
             }
         }
 
-        // 5) Cập nhật Users + UserProfiles
         using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
-            // Update User fields
+            // Cập nhật User
             user.FullName = req.Name.Trim();
 
-            // Chỉ update Phone nếu có giá trị mới
             if (!string.IsNullOrWhiteSpace(req.Phone))
             {
                 user.Phone = req.Phone.Trim();
             }
 
-            // Update hoặc tạo mới UserProfile
+            // Cập nhật hoặc tạo mới UserProfile
             if (user.Profile == null)
             {
                 _logger.LogInformation("Creating new UserProfile for UserId: {UserId}", userId);
 
+                // CHỈ GÁN QUA NAVIGATION PROPERTY - KHÔNG CẦN _db.UserProfiles.Add()
                 user.Profile = new UserProfile
                 {
                     UserId = user.UserId,
@@ -755,11 +726,11 @@ public class AccountsController : ControllerBase
                     Bio = string.IsNullOrWhiteSpace(req.Bio) ? null : req.Bio.Trim(),
                     UpdatedAt = DateTime.UtcNow
                 };
-                _db.UserProfiles.Add(user.Profile);
+                // ✅ XÓA: _db.UserProfiles.Add(user.Profile);
             }
             else
             {
-                // CHỈ update các field có giá trị mới, không overwrite với null/empty
+                // Profile đã tồn tại - cập nhật các field
                 if (!string.IsNullOrWhiteSpace(req.AvatarUrl))
                 {
                     user.Profile.AvatarUrl = req.AvatarUrl.Trim();
@@ -789,11 +760,9 @@ public class AccountsController : ControllerBase
         {
             await tx.RollbackAsync();
 
-            // LOG CHI TIẾT LỖI - đây là điểm quan trọng!
             _logger.LogError(ex, "Error updating profile for UserId: {UserId}. Error: {ErrorMessage}",
                 userId, ex.Message);
 
-            // Kiểm tra loại exception để trả về message phù hợp
             if (ex.InnerException != null)
             {
                 _logger.LogError("Inner exception: {InnerException}", ex.InnerException.Message);
@@ -803,9 +772,7 @@ public class AccountsController : ControllerBase
                 new
                 {
                     success = false,
-                    message = "Có lỗi máy chủ khi cập nhật hồ sơ.",
-                    // CHỈ DÙNG TRONG DEV - xóa dòng dưới trong production
-                    // error = ex.Message 
+                    message = "Có lỗi máy chủ khi cập nhật hồ sơ."
                 });
         }
 
@@ -826,7 +793,6 @@ public class AccountsController : ControllerBase
             }
         });
     }
-
 
     // ===== UPLOAD AVATAR =====
     [HttpPost("avatar")]

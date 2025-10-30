@@ -1,5 +1,6 @@
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\FoMed_WebAPI.exe
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\FoMed_WebAPI.dll
+C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Azure.Core.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Microsoft.AspNetCore.Authentication.JwtBearer.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Microsoft.AspNetCore.OpenApi.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Microsoft.EntityFrameworkCore.dll
@@ -29,8 +30,11 @@ C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Swa
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Swashbuckle.AspNetCore.Swagger.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Swashbuckle.AspNetCore.SwaggerGen.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Swashbuckle.AspNetCore.SwaggerUI.dll
+C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.ClientModel.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.Configuration.ConfigurationManager.dll
+C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.Formats.Asn1.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.IdentityModel.Tokens.Jwt.dll
+C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.Memory.Data.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.Text.Json.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\runtimes\win\lib\net6.0\Microsoft.Data.SqlClient.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\runtimes\win-x64\native\Microsoft.Data.SqlClient.SNI.dll

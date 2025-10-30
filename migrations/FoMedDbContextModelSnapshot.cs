@@ -133,10 +133,13 @@ namespace FoMed_WebAPI.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("DoctorId"));
 
                     b.Property<string>("AvatarUrl")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("ExperienceNote")
                         .HasColumnType("nvarchar(max)");
@@ -148,7 +151,9 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("LicenseNo")
                         .HasMaxLength(50)
@@ -164,13 +169,17 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("RoomName")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("Title")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<long>("UserId")
                         .HasColumnType("bigint");
@@ -183,6 +192,8 @@ namespace FoMed_WebAPI.Migrations
                     b.HasIndex("PrimarySpecialtyId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("IsActive", "PrimarySpecialtyId");
 
                     b.ToTable("Doctors");
                 });
@@ -1302,9 +1313,6 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("datetime2(3)")
                         .HasDefaultValueSql("SYSUTCDATETIME()");
 
-                    b.Property<DateOnly?>("DateOfBirth")
-                        .HasColumnType("date");
-
                     b.Property<string>("Email")
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
@@ -1313,9 +1321,6 @@ namespace FoMed_WebAPI.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Gender")
-                        .HasColumnType("nvarchar(1)");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
@@ -1341,17 +1346,18 @@ namespace FoMed_WebAPI.Migrations
                     b.HasKey("UserId");
 
                     b.HasIndex("Email")
-                        .HasDatabaseName("IX_Users_Email");
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_Email")
+                        .HasFilter("[Email] IS NOT NULL");
 
                     b.HasIndex("FullName");
 
                     b.HasIndex("Phone")
-                        .HasDatabaseName("IX_Users_Phone");
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_Phone")
+                        .HasFilter("[Phone] IS NOT NULL");
 
-                    b.ToTable("Users", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_Users_Gender", "([Gender] IN ('M','F') OR [Gender] IS NULL)");
-                        });
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.UserExternalLogin", b =>
@@ -1681,27 +1687,34 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<string>("Address")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("AvatarUrl")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Bio")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
-                    b.Property<DateTime?>("DateOfBirth")
-                        .HasColumnType("datetime2");
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date");
 
                     b.Property<string>("Gender")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("char(1)");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2(3)")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.HasKey("UserId");
 
-                    b.ToTable("UserProfiles");
+                    b.ToTable("UserProfiles", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_UserProfiles_Gender", "([Gender] IN ('M','F') OR [Gender] IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.Appointment", b =>
