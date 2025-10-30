@@ -517,7 +517,7 @@ public class AccountsController : ControllerBase
     Tags = new[] { "Accounts" })]
     public async Task<IActionResult> GetProfile([FromBody] ProfileByTokenRequest req)
     {
-        // 1) Lấy token: ưu tiên Authorization header, fallback body
+        // Lấy token: Authorization header, fallback body
         string? token = null;
 
         var authHeader = Request.Headers.Authorization.ToString();
@@ -530,7 +530,7 @@ public class AccountsController : ControllerBase
         if (string.IsNullOrWhiteSpace(token))
             return BadRequest(new { error = "Thiếu token." });
 
-        // 2) Validate token (đồng nhất với JwtBearer)
+        // Validate token
         var tvp = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -540,7 +540,7 @@ public class AccountsController : ControllerBase
             ValidIssuer = _cfg["Jwt:Issuer"],
             ValidAudience = _cfg["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_cfg["Jwt:Key"]!)),
-            ClockSkew = TimeSpan.FromMinutes(2) // nới 2 phút để tránh lệch giờ nhỏ
+            ClockSkew = TimeSpan.FromMinutes(2)
         };
 
         ClaimsPrincipal principal;
@@ -549,41 +549,68 @@ public class AccountsController : ControllerBase
             var handler = new JwtSecurityTokenHandler();
             principal = handler.ValidateToken(token, tvp, out _);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Token validation failed");
             return Unauthorized(new { error = "Token không hợp lệ hoặc đã hết hạn." });
         }
 
-        // 3) Lấy userId từ claims
+        // Lấy userId từ claims
         var idStr = principal.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal.FindFirstValue("uid");
         if (!long.TryParse(idStr, out var userId))
             return Unauthorized(new { error = "Token không chứa user id." });
 
-        // 4) Truy vấn dữ liệu
-        var data = await _db.Users
+        // Truy vấn dữ liệu - XỬ LÝ Profile NULL
+        var user = await _db.Users
             .AsNoTracking()
             .Include(u => u.Profile)
-            .Where(u => u.UserId == userId && u.IsActive)
-            .Select(u => new
-            {
-                id = u.UserId,
-                name = u.FullName,
-                email = u.Email,
-                phone = u.Phone,
-                gender = u.Profile!.Gender == null ? null : (u.Profile.Gender == 'M' ? "Male" : "Female"),
-                dateOfBirth = u.Profile!.DateOfBirth.HasValue
-                    ? (DateTime?)u.Profile.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
-                    : (DateTime?)null,
-                createdAt = u.CreatedAt,
-                avatarUrl = u.Profile!.AvatarUrl,
-                address = u.Profile!.Address,
-                bio = u.Profile!.Bio,
-                profileUpdatedAt = (DateTime?)u.Profile!.UpdatedAt
-            })
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(u => u.UserId == userId && u.IsActive);
 
-        if (data == null)
+        if (user == null)
+        {
+            _logger.LogWarning("User not found or inactive. UserId: {UserId}", userId);
             return NotFound(new { error = "Không tìm thấy người dùng" });
+        }
+
+        // Tạo UserProfile nếu chưa có 
+        if (user.Profile == null)
+        {
+            _logger.LogInformation("Creating missing UserProfile for UserId: {UserId}", userId);
+
+            // Tạo profile mới trong DB
+            var newProfile = new UserProfile
+            {
+                UserId = userId,
+                Gender = null,
+                DateOfBirth = null,
+                AvatarUrl = null,
+                Address = null,
+                Bio = null,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _db.UserProfiles.Add(newProfile);
+            await _db.SaveChangesAsync();
+
+            user.Profile = newProfile; // Gán vào object đang dùng
+        }
+
+        var data = new
+        {
+            id = user.UserId,
+            name = user.FullName,
+            email = user.Email,
+            phone = user.Phone,
+            gender = user.Profile.Gender == null ? null : (user.Profile.Gender == 'M' ? "Male" : "Female"),
+            dateOfBirth = user.Profile.DateOfBirth.HasValue
+                ? (DateTime?)user.Profile.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
+                : null,
+            createdAt = user.CreatedAt,
+            avatarUrl = user.Profile.AvatarUrl,
+            address = user.Profile.Address,
+            bio = user.Profile.Bio,
+            profileUpdatedAt = (DateTime?)user.Profile.UpdatedAt
+        };
 
         return Ok(new { message = "Get account profile successfully", data });
     }

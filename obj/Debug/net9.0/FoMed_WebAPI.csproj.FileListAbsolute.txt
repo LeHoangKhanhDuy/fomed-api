@@ -33,3 +33,4 @@ C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Sys
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\System.Text.Json.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\runtimes\win\lib\net6.0\Microsoft.Data.SqlClient.dll
 C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\runtimes\win-x64\native\Microsoft.Data.SqlClient.SNI.dll
+C:\DotNet Core BootCamp\Đồ Án Cuối Khóa\FoMed_WebAPI\bin\Debug\net9.0\Microsoft.IdentityModel.Abstractions.dll
