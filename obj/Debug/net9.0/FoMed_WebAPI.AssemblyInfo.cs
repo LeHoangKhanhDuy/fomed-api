@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("FoMed_WebAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+32d8fc9a563adc4a17cb81ed42219205567b34e3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4af2dcabe20e28a072cd742546aaebdda41f0fd0")]
 [assembly: System.Reflection.AssemblyProductAttribute("FoMed_WebAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("FoMed_WebAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

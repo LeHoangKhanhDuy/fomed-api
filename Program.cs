@@ -9,6 +9,7 @@ using FoMed.Api.Auth;
 using FoMed.Api.Models;
 using System.Text;
 using Microsoft.OpenApi.Any;
+using Microsoft.Extensions.FileProviders;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -110,6 +111,8 @@ builder.Services.AddSwaggerGen(c =>
     c.MapType<TimeOnly>(() => new OpenApiSchema { Type = "string", Example = new OpenApiString("09:35:00") });
 });
 
+var signingKey = new SymmetricSecurityKey(jwtKeyBytes);
+
 // JWT Auth
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
@@ -123,10 +126,11 @@ builder.Services
         ValidateAudience = true,
         ValidateIssuerSigningKey = true,
         ValidateLifetime = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"],
-        ValidAudience = builder.Configuration["Jwt:Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+
+        ValidIssuer = jwtIssuer,
+        ValidAudience = jwtAudience,
+        IssuerSigningKey = signingKey,
+
         ClockSkew = TimeSpan.FromMinutes(2)
     };
 
@@ -139,13 +143,11 @@ builder.Services
         },
         OnChallenge = ctx =>
         {
-            // giúp thấy lỗi rõ ràng hơn trong log
             Console.WriteLine("JWT challenge: " + ctx.ErrorDescription);
             return Task.CompletedTask;
         }
     };
 });
-
 
 builder.Services.AddAuthorization();
 
@@ -201,18 +203,17 @@ if (!Directory.Exists(avatarsPath))
 // Serve files từ wwwroot
 app.UseStaticFiles();
 
-// Serve files từ folder uploads
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
-        Path.Combine(Directory.GetCurrentDirectory(), "uploads")),
-    RequestPath = "/uploads",
-    OnPrepareResponse = ctx =>
-    {
-        // Cache ảnh trong 7 ngày
-        ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=604800");
-    }
-});
+// // Serve files từ folder uploads
+// app.UseStaticFiles(new StaticFileOptions
+// {
+//     FileProvider = new PhysicalFileProvider(
+//         Path.Combine(Directory.GetCurrentDirectory(), "uploads")),
+//     RequestPath = "/uploads",
+//     OnPrepareResponse = ctx =>
+//     {
+//         ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=604800");
+//     }
+// });
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -223,7 +224,7 @@ app.UseSwaggerUI(c =>
 
 app.UseRouting();
 
-// CORS mặc định: PublicApi (không credentials)
+// CORS mặc định: PublicApi
 app.UseCors(PublicApi);
 
 app.UseAuthentication();
