@@ -1,6 +1,4 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +9,6 @@ using FoMed.Api.Auth;
 using FoMed.Api.Models;
 using System.Text;
 using Microsoft.OpenApi.Any;
-using FoMed.Api;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -19,7 +16,7 @@ var cfg = builder.Configuration;
 
 // DB connection
 var cs = cfg.GetConnectionString("Default")
-         ?? throw new InvalidOperationException("Missing ConnectionStrings:Default");
+        ?? throw new InvalidOperationException("Missing ConnectionStrings:Default");
 
 // CORS allowed origins (cho policy dùng credentials)
 var allowedOrigins = cfg.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -36,7 +33,7 @@ catch { throw new InvalidOperationException("Jwt:Key must be BASE64 (256-bit+)."
 if (jwtKeyBytes.Length < 32)
     throw new InvalidOperationException("Jwt:Key too short. Need >= 32 bytes (256-bit).");
 
-// ================== 2) SERVICES ==================
+// ================== SERVICES ==================
 
 // EF Core + retry
 builder.Services.AddDbContext<FoMedContext>(opt =>
@@ -47,40 +44,40 @@ builder.Services.AddDbContext<FoMedContext>(opt =>
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // ✅ Convert PascalCase -> camelCase
+        // Convert PascalCase -> camelCase
         options.JsonSerializerOptions.PropertyNamingPolicy =
             System.Text.Json.JsonNamingPolicy.CamelCase;
 
-        // ✅ Ignore null values (optional)
+        // Ignore null values
         options.JsonSerializerOptions.DefaultIgnoreCondition =
             System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
 
-        // ✅ Format DateTime as ISO 8601
+        // Format DateTime as ISO 8601
         options.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter());
     });
 
-// ------------- CORS (2 policy) -------------
+// ------------- CORS  -------------
 const string PublicApi = "PublicApi";
 const string AuthWithCreds = "AuthWithCreds";
 
 builder.Services.AddCors(o =>
 {
-    // Policy mặc định: không credentials (phù hợp mọi API thường ngày, Bearer header)
+    // Policy mặc định: không credentials 
     o.AddPolicy(PublicApi, p => p
         .AllowAnyOrigin()
         .AllowAnyHeader()
         .AllowAnyMethod());
 
-    // Policy cho route cần cookie/credentials (ví dụ refresh)
+    // Policy cho route cần cookie/credentials 
     o.AddPolicy(AuthWithCreds, p =>
     {
         if (allowedOrigins.Length == 0)
             throw new InvalidOperationException("Cors:AllowedOrigins is required for AuthWithCreds.");
         p.WithOrigins(allowedOrigins)
-         .AllowAnyHeader()
-         .AllowAnyMethod()
-         .AllowCredentials();
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
     });
 });
 
@@ -117,37 +114,37 @@ builder.Services.AddSwaggerGen(c =>
 JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
 builder.Services
-  .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-  .AddJwtBearer(options =>
-  {
-      options.TokenValidationParameters = new TokenValidationParameters
-      {
-          ValidateIssuer = true,
-          ValidateAudience = true,
-          ValidateIssuerSigningKey = true,
-          ValidateLifetime = true,
-          ValidIssuer = builder.Configuration["Jwt:Issuer"],
-          ValidAudience = builder.Configuration["Jwt:Audience"],
-          IssuerSigningKey = new SymmetricSecurityKey(
-              Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
-          ClockSkew = TimeSpan.FromMinutes(2)
-      };
+.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateIssuerSigningKey = true,
+        ValidateLifetime = true,
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+        ClockSkew = TimeSpan.FromMinutes(2)
+    };
 
-      options.Events = new JwtBearerEvents
-      {
-          OnAuthenticationFailed = ctx =>
-          {
-              Console.WriteLine("JWT failed: " + ctx.Exception?.Message);
-              return Task.CompletedTask;
-          },
-          OnChallenge = ctx =>
-          {
-              // giúp thấy lỗi rõ ràng hơn trong log
-              Console.WriteLine("JWT challenge: " + ctx.ErrorDescription);
-              return Task.CompletedTask;
-          }
-      };
-  });
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = ctx =>
+        {
+            Console.WriteLine("JWT failed: " + ctx.Exception?.Message);
+            return Task.CompletedTask;
+        },
+        OnChallenge = ctx =>
+        {
+            // giúp thấy lỗi rõ ràng hơn trong log
+            Console.WriteLine("JWT challenge: " + ctx.ErrorDescription);
+            return Task.CompletedTask;
+        }
+    };
+});
 
 
 builder.Services.AddAuthorization();
@@ -164,22 +161,58 @@ builder.Services.Configure<ApiBehaviorOptions>(opt =>
     };
 });
 
-// DI cho token service của bạn
+// DI cho token service
 builder.Services.AddScoped<ITokenService, TokenService>();
 
-// ================== 3) BUILD & PIPELINE ==================
+// ================== BUILD & PIPELINE ==================
 var app = builder.Build();
 
-// Forwarded headers (deploy sau LB / proxy)
+// Forwarded headers 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor |
-                       ForwardedHeaders.XForwardedProto |
-                       ForwardedHeaders.XForwardedHost,
+                    ForwardedHeaders.XForwardedProto |
+                    ForwardedHeaders.XForwardedHost,
     RequireHeaderSymmetry = false
 });
 
+var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+var doctorsPath = Path.Combine(uploadsPath, "doctors");
+var avatarsPath = Path.Combine(uploadsPath, "avatars");
+
+if (!Directory.Exists(uploadsPath))
+{
+    Directory.CreateDirectory(uploadsPath);
+    Console.WriteLine($"Created folder: {uploadsPath}");
+}
+
+if (!Directory.Exists(doctorsPath))
+{
+    Directory.CreateDirectory(doctorsPath);
+    Console.WriteLine($"Created folder: {doctorsPath}");
+}
+
+if (!Directory.Exists(avatarsPath))
+{
+    Directory.CreateDirectory(avatarsPath);
+    Console.WriteLine($"Created folder: {avatarsPath}");
+}
+
+// Serve files từ wwwroot
 app.UseStaticFiles();
+
+// Serve files từ folder uploads
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
+        Path.Combine(Directory.GetCurrentDirectory(), "uploads")),
+    RequestPath = "/uploads",
+    OnPrepareResponse = ctx =>
+    {
+        // Cache ảnh trong 7 ngày
+        ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=604800");
+    }
+});
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -198,25 +231,18 @@ app.UseAuthorization();
 
 // Health
 app.MapGet("/health", () => Results.Ok(new { ok = true, time = DateTime.UtcNow }))
-   .AllowAnonymous();
+.AllowAnonymous();
 
-// ================== 4) ROUTES ==================
-// Refresh token (ví dụ dùng cookie httpOnly + credentials)
+// ================== ROUTES ==================
+// Refresh token
 app.MapPost("/api/v1/auth/refresh", async (HttpContext http, ITokenService tokenSvc) =>
 {
-    // Ví dụ đọc cookie refresh
     var refresh = http.Request.Cookies["refresh_token"];
     if (string.IsNullOrEmpty(refresh))
         return Results.Unauthorized();
-
-    // TODO: validate + rotate + tạo access token mới
-    // var jwt = await tokenSvc.RefreshAsync(refresh);
-    // return Results.Ok(new { token = jwt.AccessToken, expires_in = jwt.ExpiresIn });
-
-    // Stub để chạy được ngay
     return Results.Ok(new { token = "placeholder", expires_in = 900 });
 })
-.RequireCors(AuthWithCreds)   // route này cần credentials
+.RequireCors(AuthWithCreds)
 .AllowAnonymous();
 
 // Controllers
