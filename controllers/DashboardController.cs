@@ -7,7 +7,7 @@ using System.Globalization;
 
 [ApiController]
 [Route("api/v1/dashboard/")]
-[Authorize(Roles = "ADMIN,EMPLOYEE")]
+[Authorize(Roles = "ADMIN,EMPLOYEE,DOCTOR")]
 public class DashboardController : ControllerBase
 {
     private readonly FoMedContext _db;
