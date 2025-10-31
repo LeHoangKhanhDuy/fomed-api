@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using FoMed.Api.Models;
+using FoMed.Api.Dtos.DoctorSchedule;
 
 [ApiController]
 [Route("api/v1/doctors")]
@@ -594,6 +595,7 @@ public class DoctorsController : ControllerBase
         return Ok(new { success = true, message = "Đã kích hoạt hồ sơ bác sĩ." });
     }
 
+    // DANH SÁCH BÁC SĨ CÙNG CHUYÊN KHOA
     [HttpGet("related/{doctorId:int}")]
     [AllowAnonymous]
     [Produces("application/json")]
@@ -660,4 +662,350 @@ public class DoctorsController : ControllerBase
             Data: doctors
         ));
     }
+
+    // TẠO LỊCH LÀM VIỆC CHO BÁC SĨ
+    [HttpPost("schedule/{doctorId:int}")]
+    [Authorize(Roles = "ADMIN,DOCTOR,EMPLOYEE")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+    Summary = "Tạo khung giờ làm việc lặp hàng tuần cho bác sĩ",
+    Description = "ADMIN, EMPLOYEE có thể tạo cho bất kỳ bác sĩ nào. DOCTOR chỉ có thể tạo cho chính mình.",
+    Tags = new[] { "DoctorSchedules" }
+)]
+    public async Task<IActionResult> CreateWeeklySlot(
+    [FromRoute] int doctorId,
+    [FromBody] CreateWeeklySlotRequest req,
+    CancellationToken ct = default)
+    {
+        // 1. Kiểm tra doctor tồn tại và active
+        var doctor = await _db.Doctors
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.DoctorId == doctorId && d.IsActive, ct);
+
+        if (doctor == null)
+        {
+            return NotFound(new
+            {
+                success = false,
+                message = "Không tìm thấy bác sĩ hoặc bác sĩ đang không hoạt động."
+            });
+        }
+
+        // 2. Doctor chỉ tạo cho chính mình
+        if (User.IsInRole("DOCTOR"))
+        {
+            var claimDoctorId = User.Claims
+                .FirstOrDefault(c => c.Type == "DoctorId")?.Value;
+
+            if (string.IsNullOrEmpty(claimDoctorId) || claimDoctorId != doctorId.ToString())
+                return Forbid();
+        }
+
+        // 3. Validate input
+        if (req.Weekday < 1 || req.Weekday > 7)
+            return BadRequest(new { success = false, message = "Weekday phải từ 1 đến 7." });
+
+        if (req.StartTime >= req.EndTime)
+            return BadRequest(new { success = false, message = "Giờ bắt đầu phải nhỏ hơn giờ kết thúc." });
+
+        // 4. Check trùng khung giờ cùng Weekday
+        bool overlap = await _db.DoctorWeeklySlots.AnyAsync(s =>
+            s.DoctorId == doctorId &&
+            s.IsActive &&
+            s.Weekday == req.Weekday &&
+            s.StartTime < req.EndTime &&
+            s.EndTime > req.StartTime,
+            ct);
+
+        if (overlap)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Khung giờ này bị trùng với khung giờ đã tồn tại trong cùng ngày trong tuần."
+            });
+        }
+
+        // 5. Tạo mới
+        var entity = new DoctorWeeklySlot
+        {
+            DoctorId = doctorId,
+            Weekday = req.Weekday,
+            StartTime = req.StartTime,
+            EndTime = req.EndTime,
+            Note = req.Note,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.DoctorWeeklySlots.Add(entity);
+        await _db.SaveChangesAsync(ct);
+
+        // 6. Lấy lại có include để map ra dto đẹp
+        var saved = await _db.DoctorWeeklySlots
+            .Include(s => s.Doctor)
+                .ThenInclude(d => d.User)
+            .FirstAsync(s => s.SlotId == entity.SlotId, ct);
+
+        return Ok(new
+        {
+            success = true,
+            data = DoctorWeeklySlotMapper.ToDto(saved),
+            message = "Tạo lịch làm việc hàng tuần thành công."
+        });
+    }
+
+    // LẤY DANH SÁCH GIỜ LÀM VIỆC HÀNG TUẦN
+    [HttpGet("schedule-week/{doctorId:int}")]
+    [Authorize(Roles = "ADMIN,DOCTOR,EMPLOYEE")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+    Summary = "Lấy danh sách khung giờ làm việc lặp hàng tuần của bác sĩ",
+    Description = "Trả về theo thứ trong tuần, không expand ra ngày cụ thể",
+    Tags = new[] { "DoctorSchedules" }
+)]
+    public async Task<IActionResult> GetWeeklySlots(
+    [FromRoute] int doctorId,
+    CancellationToken ct = default)
+    {
+        // Doctor chỉ xem của mình
+        if (User.IsInRole("DOCTOR"))
+        {
+            var claimDoctorId = User.Claims
+                .FirstOrDefault(c => c.Type == "DoctorId")?.Value;
+
+            if (string.IsNullOrEmpty(claimDoctorId) || claimDoctorId != doctorId.ToString())
+                return Forbid();
+        }
+
+        var slots = await _db.DoctorWeeklySlots
+            .Include(s => s.Doctor)
+                .ThenInclude(d => d.User)
+            .Where(s => s.DoctorId == doctorId && s.IsActive)
+            .OrderBy(s => s.Weekday)
+            .ThenBy(s => s.StartTime)
+            .Select(s => DoctorWeeklySlotMapper.ToDto(s))
+            .ToListAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            data = slots
+        });
+    }
+
+    // LỊCH LÀM VIỆC THEO TỪNG TUẦN
+    [HttpGet("calendar")]
+    [Authorize(Roles = "ADMIN,DOCTOR,EMPLOYEE")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+    Summary = "Lịch làm việc hiển thị dạng tuần",
+    Description = "Expand slot lặp theo thứ ra từng ngày cụ thể trong khoảng from..to để đổ lên calendar UI",
+    Tags = new[] { "DoctorSchedules" }
+    )]
+    public async Task<IActionResult> GetCalendar(
+    [FromQuery] DateOnly from,
+    [FromQuery] DateOnly to,
+    [FromQuery] int? doctorId,
+    CancellationToken ct = default)
+    {
+        if (to < from)
+            return BadRequest(new { success = false, message = "Khoảng thời gian không hợp lệ." });
+
+        // Load tất cả bác sĩ hợp lệ (và lọc nếu FE chọn 1 bác sĩ cụ thể)
+        var doctorQuery = _db.Doctors
+            .Include(d => d.User)
+            .AsNoTracking()
+            .Where(d => d.IsActive);
+
+        if (doctorId.HasValue && doctorId.Value > 0)
+            doctorQuery = doctorQuery.Where(d => d.DoctorId == doctorId.Value);
+
+        var doctors = await doctorQuery
+            .Select(d => new
+            {
+                d.DoctorId,
+                DoctorName = "BS. " + d.User!.FullName,
+                d.RoomName
+            })
+            .ToListAsync(ct);
+
+        if (!doctors.Any())
+            return Ok(new { success = true, data = new List<DoctorCalendarBlockDto>() });
+
+        var doctorIds = doctors.Select(d => d.DoctorId).ToList();
+
+        // Lấy tất cả slot lặp của những bác sĩ đó
+        var slots = await _db.DoctorWeeklySlots
+            .AsNoTracking()
+            .Where(s => s.IsActive && doctorIds.Contains(s.DoctorId))
+            .ToListAsync(ct);
+
+        var result = new List<DoctorCalendarBlockDto>();
+
+        for (var date = from; date <= to; date = date.AddDays(1))
+        {
+            // map DayOfWeek -> Weekday 1..7
+            byte weekdayNumber = date.DayOfWeek switch
+            {
+                DayOfWeek.Monday => (byte)1,
+                DayOfWeek.Tuesday => (byte)2,
+                DayOfWeek.Wednesday => (byte)3,
+                DayOfWeek.Thursday => (byte)4,
+                DayOfWeek.Friday => (byte)5,
+                DayOfWeek.Saturday => (byte)6,
+                DayOfWeek.Sunday => (byte)7,
+                _ => (byte)0
+            };
+
+            foreach (var s in slots.Where(x => x.Weekday == weekdayNumber))
+            {
+                var meta = doctors.First(d => d.DoctorId == s.DoctorId);
+
+                result.Add(new DoctorCalendarBlockDto
+                {
+                    SlotId = s.SlotId,
+                    DoctorId = s.DoctorId,
+                    DoctorName = meta.DoctorName,
+                    RoomName = meta.RoomName,
+
+                    Date = date, // ngày thực tế trong tuần
+                    StartTime = s.StartTime,
+                    EndTime = s.EndTime,
+
+                    Note = s.Note
+                });
+            }
+        }
+
+        // sort cho đẹp
+        result = result
+            .OrderBy(r => r.Date)
+            .ThenBy(r => r.StartTime)
+            .ThenBy(r => r.DoctorName)
+            .ToList();
+
+        return Ok(new
+        {
+            success = true,
+            data = result
+        });
+    }
+
+    // CẬP NHẬT LỊCH LÀM VIỆC
+    [HttpPut("schedule-update/{slotId:long}")]
+    [Authorize(Roles = "ADMIN,DOCTOR,EMPLOYEE")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+    Summary = "Cập nhật khung giờ làm việc lặp hàng tuần",
+    Description = "Sửa ca trực cố định",
+    Tags = new[] { "DoctorSchedules" }
+    )]
+    public async Task<IActionResult> UpdateWeeklySlot(
+    [FromRoute] long slotId,
+    [FromBody] UpdateWeeklySlotRequest req,
+    CancellationToken ct = default)
+    {
+        var slot = await _db.DoctorWeeklySlots
+            .Include(s => s.Doctor)
+                .ThenInclude(d => d.User)
+            .FirstOrDefaultAsync(s => s.SlotId == slotId, ct);
+
+        if (slot == null)
+            return NotFound(new { success = false, message = "Không tìm thấy slot." });
+
+        // Nếu user là DOCTOR thì chỉ được sửa slot của mình
+        if (User.IsInRole("DOCTOR"))
+        {
+            var claimDoctorId = User.Claims
+                .FirstOrDefault(c => c.Type == "DoctorId")?.Value;
+
+            if (string.IsNullOrEmpty(claimDoctorId) || claimDoctorId != slot.DoctorId.ToString())
+                return Forbid();
+        }
+
+        if (req.Weekday < 1 || req.Weekday > 7)
+            return BadRequest(new { success = false, message = "Weekday phải từ 1 đến 7." });
+
+        if (req.StartTime >= req.EndTime)
+            return BadRequest(new { success = false, message = "Giờ bắt đầu phải nhỏ hơn giờ kết thúc." });
+
+        // check overlap trùng giờ (ngoại trừ chính nó)
+        bool overlap = await _db.DoctorWeeklySlots.AnyAsync(s =>
+            s.SlotId != slotId &&
+            s.DoctorId == slot.DoctorId &&
+            s.IsActive &&
+            s.Weekday == req.Weekday &&
+            s.StartTime < req.EndTime &&
+            s.EndTime > req.StartTime,
+            ct);
+
+        if (overlap)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Khung giờ này bị trùng với khung giờ khác."
+            });
+        }
+
+        slot.Weekday = req.Weekday;
+        slot.StartTime = req.StartTime;
+        slot.EndTime = req.EndTime;
+        slot.Note = req.Note;
+        slot.IsActive = req.IsActive;
+        // slot.CreatedAt giữ nguyên, không đụng
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            data = DoctorWeeklySlotMapper.ToDto(slot),
+            message = "Cập nhật thành công."
+        });
+    }
+
+    // VÔ HIỆU HÓA KHUNG GIỜ
+    [HttpDelete("shedule-delete/{slotId:long}")]
+    [Authorize(Roles = "ADMIN,DOCTOR,EMPLOYEE")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+    Summary = "Xoá (vô hiệu hoá) khung giờ làm việc lặp hàng tuần",
+    Description = "Dùng cho nút thùng rác trong calendar block",
+    Tags = new[] { "DoctorSchedules" }
+)]
+    public async Task<IActionResult> DeleteWeeklySlot(
+    [FromRoute] long slotId,
+    CancellationToken ct = default)
+    {
+        var slot = await _db.DoctorWeeklySlots
+            .Include(s => s.Doctor)
+                .ThenInclude(d => d.User)
+            .FirstOrDefaultAsync(s => s.SlotId == slotId, ct);
+
+        if (slot == null)
+            return NotFound(new { success = false, message = "Không tìm thấy slot." });
+
+        // Doctor chỉ được xoá slot của mình
+        if (User.IsInRole("DOCTOR"))
+        {
+            var claimDoctorId = User.Claims
+                .FirstOrDefault(c => c.Type == "DoctorId")?.Value;
+
+            if (string.IsNullOrEmpty(claimDoctorId) || claimDoctorId != slot.DoctorId.ToString())
+                return Forbid();
+        }
+
+        // Xoá mềm
+        slot.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Đã vô hiệu hoá ca trực."
+        });
+    }
+
 }
