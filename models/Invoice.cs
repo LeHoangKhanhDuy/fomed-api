@@ -60,6 +60,7 @@ public class InvoiceItem
 
 public class Payment
 {
+    [Key]
     public long PaymentId { get; set; }
     public long InvoiceId { get; set; }
     public decimal Amount { get; set; }
