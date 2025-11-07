@@ -249,6 +249,88 @@
       ]
     },
     {
+      "Route": "uploads/doctors/doctor_4_1fdd1c2a4a584db68db899829494aadd.7n70ezu8s5.jpg",
+      "AssetFile": "uploads/doctors/doctor_4_1fdd1c2a4a584db68db899829494aadd.jpg",
+      "Selectors": [],
+      "ResponseHeaders": [
+        {
+          "Name": "Accept-Ranges",
+          "Value": "bytes"
+        },
+        {
+          "Name": "Cache-Control",
+          "Value": "max-age=31536000, immutable"
+        },
+        {
+          "Name": "Content-Length",
+          "Value": "95160"
+        },
+        {
+          "Name": "Content-Type",
+          "Value": "image/jpeg"
+        },
+        {
+          "Name": "ETag",
+          "Value": "\"Tb+ulcp7Ii/4hdomZMu65a+T68wzd6sfnNtFyTKpA9U=\""
+        },
+        {
+          "Name": "Last-Modified",
+          "Value": "Fri, 07 Nov 2025 12:25:21 GMT"
+        }
+      ],
+      "EndpointProperties": [
+        {
+          "Name": "fingerprint",
+          "Value": "7n70ezu8s5"
+        },
+        {
+          "Name": "integrity",
+          "Value": "sha256-Tb+ulcp7Ii/4hdomZMu65a+T68wzd6sfnNtFyTKpA9U="
+        },
+        {
+          "Name": "label",
+          "Value": "uploads/doctors/doctor_4_1fdd1c2a4a584db68db899829494aadd.jpg"
+        }
+      ]
+    },
+    {
+      "Route": "uploads/doctors/doctor_4_1fdd1c2a4a584db68db899829494aadd.jpg",
+      "AssetFile": "uploads/doctors/doctor_4_1fdd1c2a4a584db68db899829494aadd.jpg",
+      "Selectors": [],
+      "ResponseHeaders": [
+        {
+          "Name": "Accept-Ranges",
+          "Value": "bytes"
+        },
+        {
+          "Name": "Cache-Control",
+          "Value": "max-age=3600, must-revalidate"
+        },
+        {
+          "Name": "Content-Length",
+          "Value": "95160"
+        },
+        {
+          "Name": "Content-Type",
+          "Value": "image/jpeg"
+        },
+        {
+          "Name": "ETag",
+          "Value": "\"Tb+ulcp7Ii/4hdomZMu65a+T68wzd6sfnNtFyTKpA9U=\""
+        },
+        {
+          "Name": "Last-Modified",
+          "Value": "Fri, 07 Nov 2025 12:25:21 GMT"
+        }
+      ],
+      "EndpointProperties": [
+        {
+          "Name": "integrity",
+          "Value": "sha256-Tb+ulcp7Ii/4hdomZMu65a+T68wzd6sfnNtFyTKpA9U="
+        }
+      ]
+    },
+    {
       "Route": "uploads/doctors/doctor_4_2bc7779165664fa5a637c800f3ee5742.dw9z6omagz.jpg",
       "AssetFile": "uploads/doctors/doctor_4_2bc7779165664fa5a637c800f3ee5742.jpg",
       "Selectors": [],
@@ -321,88 +403,6 @@
         {
           "Name": "Last-Modified",
           "Value": "Mon, 27 Oct 2025 09:10:18 GMT"
-        }
-      ],
-      "EndpointProperties": [
-        {
-          "Name": "integrity",
-          "Value": "sha256-3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0="
-        }
-      ]
-    },
-    {
-      "Route": "uploads/doctors/doctor_4_736ec8299583446fb976647a04e8f4ca.dw9z6omagz.jpg",
-      "AssetFile": "uploads/doctors/doctor_4_736ec8299583446fb976647a04e8f4ca.jpg",
-      "Selectors": [],
-      "ResponseHeaders": [
-        {
-          "Name": "Accept-Ranges",
-          "Value": "bytes"
-        },
-        {
-          "Name": "Cache-Control",
-          "Value": "max-age=31536000, immutable"
-        },
-        {
-          "Name": "Content-Length",
-          "Value": "49533"
-        },
-        {
-          "Name": "Content-Type",
-          "Value": "image/jpeg"
-        },
-        {
-          "Name": "ETag",
-          "Value": "\"3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0=\""
-        },
-        {
-          "Name": "Last-Modified",
-          "Value": "Mon, 27 Oct 2025 12:21:20 GMT"
-        }
-      ],
-      "EndpointProperties": [
-        {
-          "Name": "fingerprint",
-          "Value": "dw9z6omagz"
-        },
-        {
-          "Name": "integrity",
-          "Value": "sha256-3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0="
-        },
-        {
-          "Name": "label",
-          "Value": "uploads/doctors/doctor_4_736ec8299583446fb976647a04e8f4ca.jpg"
-        }
-      ]
-    },
-    {
-      "Route": "uploads/doctors/doctor_4_736ec8299583446fb976647a04e8f4ca.jpg",
-      "AssetFile": "uploads/doctors/doctor_4_736ec8299583446fb976647a04e8f4ca.jpg",
-      "Selectors": [],
-      "ResponseHeaders": [
-        {
-          "Name": "Accept-Ranges",
-          "Value": "bytes"
-        },
-        {
-          "Name": "Cache-Control",
-          "Value": "max-age=3600, must-revalidate"
-        },
-        {
-          "Name": "Content-Length",
-          "Value": "49533"
-        },
-        {
-          "Name": "Content-Type",
-          "Value": "image/jpeg"
-        },
-        {
-          "Name": "ETag",
-          "Value": "\"3SI4qLPplXoAwgSYfNRnOeXOMKfMYCoPPj8TmW22Uk0=\""
-        },
-        {
-          "Name": "Last-Modified",
-          "Value": "Mon, 27 Oct 2025 12:21:20 GMT"
         }
       ],
       "EndpointProperties": [

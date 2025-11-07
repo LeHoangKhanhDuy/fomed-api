@@ -456,6 +456,16 @@ public class DoctorsController : ControllerBase
                 YearLabel = a.YearLabel,
                 Content = a.Content
             }));
+        if (req.AvatarUrl is not null)
+        {
+            var url = req.AvatarUrl.Trim();
+            if (!string.IsNullOrEmpty(url))
+            {
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var _) || !(url.StartsWith("http://") || url.StartsWith("https://")))
+                    return BadRequest(new { success = false, message = "AvatarUrl phải là URL http/https hợp lệ." });
+                doctor.AvatarUrl = url;
+            }
+        }
 
         doctor.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
