@@ -180,4 +180,88 @@ public class DashboardController : ControllerBase
 
         return Ok(res);
     }
+
+    // Thống kê doanh thu theo tháng (từ Appointments hoàn thành)
+    [HttpGet("monthly-sales")]
+    [Produces("application/json")]
+    public async Task<ActionResult> GetMonthlySales(
+        [FromQuery] int? year,
+        [FromQuery] int? doctorId,
+        [FromQuery] int? serviceId,
+        CancellationToken ct = default)
+    {
+        var targetYear = year ?? DateTime.Now.Year;
+
+        // Base query: lấy appointments đã hoàn thành có FinalCost
+        var q = _db.Appointments
+            .AsNoTracking()
+            .Where(a => a.Status == "done" && a.FinalCost.HasValue);
+
+        if (doctorId is > 0) q = q.Where(a => a.DoctorId == doctorId);
+        if (serviceId is > 0) q = q.Where(a => a.ServiceId == serviceId);
+
+        // Lọc theo năm (dựa vào VisitDate)
+        var startOfYear = new DateOnly(targetYear, 1, 1);
+        var endOfYear = new DateOnly(targetYear, 12, 31);
+        var qInYear = q.Where(a => a.VisitDate >= startOfYear && a.VisitDate <= endOfYear);
+
+        // Tổng doanh thu cả năm
+        var totalYearRevenue = await qInYear.SumAsync(a => a.FinalCost ?? 0, ct);
+
+        // Group by tháng
+        var monthlyRaw = await qInYear
+            .GroupBy(a => a.VisitDate.Month)
+            .Select(g => new
+            {
+                Month = g.Key,
+                Revenue = g.Sum(a => a.FinalCost ?? 0),
+                Count = g.Count()
+            })
+            .OrderBy(x => x.Month)
+            .ToListAsync(ct);
+
+        // Tạo đầy đủ 12 tháng (tháng nào không có data thì = 0)
+        var monthlyData = Enumerable.Range(1, 12)
+            .Select(month =>
+            {
+                var data = monthlyRaw.FirstOrDefault(m => m.Month == month);
+                return new MonthlySalePoint(
+                    Month: month,
+                    MonthName: new DateTime(targetYear, month, 1).ToString("MMM", new CultureInfo("en-US")),
+                    Revenue: data?.Revenue ?? 0,
+                    VisitCount: data?.Count ?? 0
+                );
+            })
+            .ToList();
+
+        // Tính toán thống kê bổ sung
+        var currentMonth = DateTime.Now.Month;
+        var currentMonthData = monthlyData.FirstOrDefault(m => m.Month == currentMonth);
+        var previousMonthData = currentMonth > 1
+            ? monthlyData.FirstOrDefault(m => m.Month == currentMonth - 1)
+            : null;
+
+        decimal monthOverMonthChange = 0;
+        if (previousMonthData != null && previousMonthData.Revenue > 0)
+        {
+            monthOverMonthChange = ((currentMonthData?.Revenue ?? 0) - previousMonthData.Revenue)
+                / previousMonthData.Revenue * 100;
+        }
+
+        var avgMonthlyRevenue = monthlyData.Count > 0
+            ? monthlyData.Average(m => m.Revenue)
+            : 0;
+
+        var res = new MonthlySalesResponse(
+            Success: true,
+            Year: targetYear,
+            TotalRevenue: totalYearRevenue,
+            CurrentMonthRevenue: currentMonthData?.Revenue ?? 0,
+            MonthOverMonthChange: Math.Round(monthOverMonthChange, 2),
+            AvgMonthlyRevenue: Math.Round(avgMonthlyRevenue, 2),
+            Monthly: monthlyData
+        );
+
+        return Ok(res);
+    }
 }

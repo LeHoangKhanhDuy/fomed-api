@@ -40,6 +40,9 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<int>("DoctorId")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("FinalCost")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<long>("PatientId")
                         .HasColumnType("bigint");
 

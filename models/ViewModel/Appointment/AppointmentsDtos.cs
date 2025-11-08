@@ -25,5 +25,6 @@ public sealed class AppointmentResponse
     public string? Reason { get; set; }
     public string Status { get; set; } = "waiting";
     public int? QueueNo { get; set; }
+    public decimal? FinalCost { get; set; }
     public DateTime CreatedAt { get; set; }
 }

@@ -427,43 +427,63 @@ public class DoctorsController : ControllerBase
         if (req.ExperienceNote != null) doctor.ExperienceNote = req.ExperienceNote.Trim();
         if (req.Intro != null) doctor.Intro = req.Intro.Trim();
         if (req.IsActive.HasValue) doctor.IsActive = req.IsActive.Value;
-        if (req.AvatarUrl != null) doctor.AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim();
 
-        // Replace child collections
-        _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == id));
-        _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(e => e.DoctorId == id));
-        _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(e => e.DoctorId == id));
-
-        if (req.Educations?.Count > 0)
-            _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
-            {
-                DoctorId = id,
-                YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
-                YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
-                Title = e.Title,
-                Detail = e.Detail
-            }));
-        if (req.Expertises?.Count > 0)
-            _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
-            {
-                DoctorId = id,
-                Content = x.Content
-            }));
-        if (req.Achievements?.Count > 0)
-            _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
-            {
-                DoctorId = id,
-                YearLabel = a.YearLabel,
-                Content = a.Content
-            }));
+        // ---- AvatarUrl (URL-only): chỉ set khi có giá trị KHÔNG RỖNG
         if (req.AvatarUrl is not null)
         {
             var url = req.AvatarUrl.Trim();
             if (!string.IsNullOrEmpty(url))
             {
+                // tối thiểu kiểm tra http/https
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var _) || !(url.StartsWith("http://") || url.StartsWith("https://")))
                     return BadRequest(new { success = false, message = "AvatarUrl phải là URL http/https hợp lệ." });
+
                 doctor.AvatarUrl = url;
+            }
+            // else: KHÔNG set null để tránh xóa nhầm
+        }
+
+        // ---- Collections: chỉ replace khi request có field
+        if (req.Educations is not null)
+        {
+            _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == id));
+            if (req.Educations.Count > 0)
+            {
+                _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
+                {
+                    DoctorId = id,
+                    YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
+                    YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
+                    Title = e.Title,
+                    Detail = e.Detail
+                }));
+            }
+        }
+
+        if (req.Expertises is not null)
+        {
+            _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(x => x.DoctorId == id));
+            if (req.Expertises.Count > 0)
+            {
+                _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
+                {
+                    DoctorId = id,
+                    Content = x.Content
+                }));
+            }
+        }
+
+        if (req.Achievements is not null)
+        {
+            _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(a => a.DoctorId == id));
+            if (req.Achievements.Count > 0)
+            {
+                _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
+                {
+                    DoctorId = id,
+                    YearLabel = a.YearLabel,
+                    Content = a.Content
+                }));
             }
         }
 
