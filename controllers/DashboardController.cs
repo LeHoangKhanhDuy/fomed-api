@@ -264,4 +264,50 @@ public class DashboardController : ControllerBase
 
         return Ok(res);
     }
+
+    // Mục tiêu doanh thu theo tháng (100 tr)
+    [HttpGet("monthly-target")]
+    [Produces("application/json")]
+    public async Task<ActionResult> GetMonthlyTarget(
+        [FromQuery] int? year,
+        [FromQuery] int? month,          
+        [FromQuery] int? doctorId,
+        [FromQuery] int? serviceId,
+        [FromQuery] decimal? target,    
+        CancellationToken ct = default)
+    {
+        var now = DateTime.Now;
+        var y = year ?? now.Year;
+        var m = month is >= 1 and <= 12 ? month!.Value : (y == now.Year ? now.Month : 12);
+
+        var start = new DateOnly(y, m, 1);
+        var endExclusive = (m == 12)
+            ? new DateOnly(y + 1, 1, 1)
+            : new DateOnly(y, m + 1, 1);
+
+        // Base: chỉ lấy lịch hẹn done + có FinalCost trong tháng
+        var q = _db.Appointments
+            .AsNoTracking()
+            .Where(a => a.Status == "done" && a.FinalCost.HasValue
+                        && a.VisitDate >= start && a.VisitDate < endExclusive);
+
+        if (doctorId is > 0) q = q.Where(a => a.DoctorId == doctorId);
+        if (serviceId is > 0) q = q.Where(a => a.ServiceId == serviceId);
+
+        var actual = await q.SumAsync(a => a.FinalCost ?? 0, ct);
+
+        var targetRevenue = target ?? 100_000_000m; // mặc định 100 triệu
+        var progress = targetRevenue > 0 ? Math.Min(100m, Math.Round(actual / targetRevenue * 100m, 2)) : 0m;
+
+        var res = new MonthlyTargetResponse(
+            Success: true,
+            Year: y,
+            Month: m,
+            TargetRevenue: targetRevenue,
+            ActualRevenue: actual,
+            ProgressPercent: progress
+        );
+
+        return Ok(res);
+    }
 }
