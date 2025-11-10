@@ -4,12 +4,13 @@ using FoMed.Api.Models;
 using FoMed.Api.ViewModels.Patients;
 using Microsoft.AspNetCore.Authorization;
 using Swashbuckle.AspNetCore.Annotations;
+using System.Security.Claims;
 
 namespace FoMed.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/admin/patients")]
-[Authorize(Roles = "EMPLOYEE,ADMIN")]
+
 public class PatientsController : ControllerBase
 {
     private readonly FoMedContext _db;
@@ -19,6 +20,7 @@ public class PatientsController : ControllerBase
     [HttpGet]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Lấy danh sách bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAllPatients(
         [FromQuery] string? query,
@@ -84,6 +86,7 @@ public class PatientsController : ControllerBase
     [HttpGet("{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Lấy chi tiết bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetPatientById(long id, CancellationToken ct = default)
@@ -107,6 +110,7 @@ public class PatientsController : ControllerBase
     [HttpGet("by-phone")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Tra cứu bệnh nhân theo SĐT", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetPatientByPhone([FromQuery] string phone, CancellationToken ct = default)
@@ -128,6 +132,7 @@ public class PatientsController : ControllerBase
     [HttpPost("create")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Thêm bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(object), StatusCodes.Status409Conflict)]
@@ -169,6 +174,7 @@ public class PatientsController : ControllerBase
     [HttpPost("upsert-by-phone")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Tạo hoặc trả về nếu SĐT đã tồn tại", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> UpsertByPhone([FromBody] PatientCreateReq req, CancellationToken ct = default)
     {
@@ -185,6 +191,7 @@ public class PatientsController : ControllerBase
     [HttpPut("update/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Cập nhật bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(object), StatusCodes.Status409Conflict)]
@@ -224,6 +231,7 @@ public class PatientsController : ControllerBase
     [HttpPatch("status/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Bật/Tắt bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ToggleStatus(long id, [FromBody] ToggleStatusReq req, CancellationToken ct = default)
@@ -243,6 +251,7 @@ public class PatientsController : ControllerBase
     [HttpDelete("delete/{id:long}")]
     [Produces("application/json")]
     [SwaggerOperation(Summary = "Xoá (ẩn) bệnh nhân", Description = "EMPLOYEE/ADMIN")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(long id, CancellationToken ct = default)
@@ -255,5 +264,82 @@ public class PatientsController : ControllerBase
         p.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return Ok(new { success = true, message = "Đã ẩn bệnh nhân." });
+    }
+
+    [HttpGet("/api/v1/user/my-patient-id")]
+    [Authorize(Roles = "PATIENT")]
+    [SwaggerOperation(
+    Summary = "Lấy patientId của user đang đăng nhập",
+    Description = "Tự động tạo patient nếu chưa có",
+    Tags = new[] { "Patients - User" })]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyPatientId(CancellationToken ct)
+    {
+        // Lấy userId từ token
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!long.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        // Tìm patient theo userId
+        var patient = await _db.Patients
+            .Where(p => p.UserId == userId && p.IsActive)
+            .Select(p => new { p.PatientId, p.FullName, p.Phone })
+            .FirstOrDefaultAsync(ct);
+
+        // Nếu đã có patient, trả về
+        if (patient != null)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = new
+                {
+                    patientId = patient.PatientId,
+                    fullName = patient.FullName,
+                    phone = patient.Phone,
+                    isNew = false
+                }
+            });
+        }
+
+        // Nếu chưa có, tạo mới
+        var user = await _db.Users
+            .Where(u => u.UserId == userId)
+            .Select(u => new { u.FullName, u.Phone, u.Email })
+            .FirstOrDefaultAsync(ct);
+
+        if (user == null)
+            return NotFound(new { success = false, message = "User không tồn tại" });
+
+        if (string.IsNullOrWhiteSpace(user.Phone))
+            return BadRequest(new { success = false, message = "User chưa có số điện thoại" });
+
+        var newPatient = new Patient
+        {
+            UserId = userId,
+            FullName = user.FullName ?? "N/A",
+            Phone = user.Phone,
+            Email = user.Email,
+            Gender = null,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _db.Patients.Add(newPatient);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Đã tạo hồ sơ bệnh nhân",
+            data = new
+            {
+                patientId = newPatient.PatientId,
+                fullName = newPatient.FullName,
+                phone = newPatient.Phone,
+                isNew = true
+            }
+        });
     }
 }

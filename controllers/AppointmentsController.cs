@@ -25,7 +25,7 @@ public sealed class AppointmentsController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Create([FromBody] CreateAppointmentRequest req, CancellationToken ct)
     {
-        // ✅ Load thông tin bệnh nhân
+        // Load thông tin bệnh nhân
         var patient = await _db.Patients
             .Where(p => p.PatientId == req.PatientId)
             .Select(p => new { p.PatientId, p.FullName, p.Phone })
@@ -33,7 +33,7 @@ public sealed class AppointmentsController : ControllerBase
         if (patient == null)
             return BadRequest(new { success = false, message = "Bệnh nhân không tồn tại." });
 
-        // ✅ Load thông tin bác sĩ (JOIN với User để lấy tên)
+        // Load thông tin bác sĩ (JOIN với User để lấy tên)
         var doctorInfo = await _db.Doctors
             .Where(d => d.DoctorId == req.DoctorId)
             .Select(d => new
@@ -45,7 +45,7 @@ public sealed class AppointmentsController : ControllerBase
         if (doctorInfo == null)
             return BadRequest(new { success = false, message = "Bác sĩ không tồn tại." });
 
-        // ✅ Load thông tin dịch vụ (nếu có)
+        // Load thông tin dịch vụ (nếu có)
         string? serviceName = null;
         if (req.ServiceId.HasValue)
         {
@@ -133,7 +133,7 @@ public sealed class AppointmentsController : ControllerBase
                 await _db.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
-                // ✅ Trả về đầy đủ thông tin
+                // Trả về đầy đủ thông tin
                 var resp = new
                 {
                     AppointmentId = entity.AppointmentId,
@@ -251,6 +251,92 @@ public sealed class AppointmentsController : ControllerBase
         return Ok(new
         {
             success = true,
+            data = new
+            {
+                page,
+                limit,
+                total,
+                totalPages = (int)Math.Ceiling(total / (double)limit),
+                items
+            }
+        });
+    }
+
+    [HttpGet("patient-schedule")]
+    [Authorize(Roles = "PATIENT")]
+    [SwaggerOperation(
+    Summary = "Lấy danh sách lịch của bệnh nhân đang đăng nhập",
+    Description = "PATIENT xem các lịch hẹn của chính mình",
+    Tags = new[] { "Appointments" })]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyAppointments(
+    [FromQuery] DateOnly? dateFrom = null,
+    [FromQuery] DateOnly? dateTo = null,
+    [FromQuery] string? status = null,
+    [FromQuery] int page = 1,
+    [FromQuery] int limit = 10,
+    CancellationToken ct = default)
+    {
+        // Lấy userId từ token
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!long.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        // Lấy patientId liên kết với user
+        var patientId = await _db.Patients
+            .Where(p => p.UserId == userId && p.IsActive)
+            .Select(p => (long?)p.PatientId)
+            .FirstOrDefaultAsync(ct);
+
+        if (!patientId.HasValue)
+            return NotFound(new { success = false, message = "Không tìm thấy hồ sơ bệnh nhân cho user này." });
+
+        page = Math.Max(1, page);
+        limit = Math.Clamp(limit, 1, 200);
+
+        var q = _db.Appointments
+            .AsNoTracking()
+            .Where(a => a.PatientId == patientId.Value);
+
+        if (!string.IsNullOrWhiteSpace(status))
+            q = q.Where(a => a.Status == status.Trim());
+
+        if (dateFrom.HasValue)
+            q = q.Where(a => a.VisitDate >= dateFrom.Value);
+
+        if (dateTo.HasValue)
+            q = q.Where(a => a.VisitDate <= dateTo.Value);
+
+        var total = await q.CountAsync(ct);
+
+        var items = await q
+            .OrderByDescending(a => a.VisitDate)
+            .ThenBy(a => a.VisitTime)
+            .Skip((page - 1) * limit)
+            .Take(limit)
+            .Select(a => new
+            {
+                a.AppointmentId,
+                a.Code,
+                a.Status,
+                a.QueueNo,
+                a.CreatedAt,
+                a.VisitDate,
+                a.VisitTime,
+                a.Reason,
+                a.DoctorId,
+                DoctorName = a.Doctor != null && a.Doctor.User != null ? a.Doctor.User.FullName : $"BS #{a.DoctorId}",
+                a.ServiceId,
+                ServiceName = a.Service != null ? a.Service.Name : null
+            })
+            .ToListAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Danh sách lịch khám của bạn.",
             data = new
             {
                 page,
