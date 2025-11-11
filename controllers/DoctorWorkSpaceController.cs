@@ -17,10 +17,9 @@ public sealed class DoctorWorkspaceController : ControllerBase
     public DoctorWorkspaceController(FoMedContext db) => _db = db;
 
     // ========= Helpers =========
-
     private async Task<(int doctorId, string? error)> GetDoctorIdAsync()
     {
-        // Lấy userId từ JWT, tuỳ token của bạn có thể là "sub" hoặc "userId"
+        // Lấy userId 
         var userIdStr = User.FindFirstValue("userId")
                       ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
                       ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub);
@@ -50,7 +49,6 @@ public sealed class DoctorWorkspaceController : ControllerBase
     private static IActionResult NotFoundApi(string message) => ApiError(StatusCodes.Status404NotFound, message);
 
     // ========= DTOs =========
-
     public sealed record StartEncounterReq(int AppointmentId);
 
     public sealed record DiagnosisReq(
@@ -64,7 +62,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         int AppointmentId,
         List<int> TestIds,
         string? Note,
-        string Priority = "normal" // normal | urgent
+        string Priority = "normal"
     );
 
     public sealed record RxLineReq(
@@ -81,8 +79,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         string? Advice
     );
 
-    // ========= Catalogs (phục vụ UI dropdown) =========
-
+    // ========= Catalogs =========
     [HttpGet("lab-tests")]
     [SwaggerOperation(Summary = "Danh mục xét nghiệm")]
     public async Task<IActionResult> GetLabTests()
@@ -96,23 +93,28 @@ public sealed class DoctorWorkspaceController : ControllerBase
     }
 
     [HttpGet("medicines")]
-    [SwaggerOperation(Summary = "Danh mục thuốc")]
+    [SwaggerOperation(Summary = "Danh mục thuốc (có tồn kho)")]
     public async Task<IActionResult> GetMedicines()
     {
+        var now = DateTime.UtcNow;
+
         var items = await _db.Medicines
+            .AsNoTracking()
             .OrderBy(x => x.Name)
             .Select(x => new
             {
-                MedicineId = x.MedicineId,  // ✅ Đúng tên cột
-                Name = x.Name,
-                Unit = x.Unit
+                medicineId = x.MedicineId,
+                name = x.Name,
+                unit = x.Unit,
+                isActive = x.IsActive,
+                stock = x.Lots.Where(l => l.ExpiryDate == null || l.ExpiryDate > now).Sum(l => l.Quantity)
             })
             .ToListAsync();
 
         return ApiOk(items);
     }
 
-    // ========= 1) Bắt đầu khám (chuyển trạng thái lịch) =========
+    // =========  Bắt đầu khám  =========
 
     [HttpPost("encounters/start")]
     [SwaggerOperation(Summary = "Bắt đầu khám: chuyển trạng thái lịch sang 'waiting'→'in_progress' (nếu sử dụng) hoặc bỏ qua")]
@@ -130,17 +132,16 @@ public sealed class DoctorWorkspaceController : ControllerBase
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
-        // Không ép buộc trạng thái nếu bạn chưa có cột; nếu có: chỉ cho waiting/booked mới bắt đầu
+        // Không ép buộc trạng thái 
         if (appt.Status is "cancelled" or "no_show" or "done")
             return Bad("Trạng thái lịch hẹn hiện tại không thể bắt đầu khám.");
 
-        // appt.Status = "in_progress"; // nếu bạn có thêm trạng thái này
         await _db.SaveChangesAsync();
 
         return ApiOk(new { appt.AppointmentId, appt.Status }, "Đã sẵn sàng khám.");
     }
 
-    // ========= 2) Lưu chẩn đoán =========
+    // ========= Lưu chẩn đoán =========
 
     [HttpPost("encounters/diagnosis")]
     [SwaggerOperation(Summary = "Lưu chẩn đoán, tạo Encounter nếu chưa có")]
@@ -177,7 +178,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
             _db.Encounters.Add(enc);
         }
 
-        // Các cột dưới đây giả định tồn tại (Symptoms/Diagnosis/Note); nếu tên khác, đổi theo entity của bạn
+        // Các cột dưới đây giả định tồn tại
         enc.Symptoms = req.Symptoms.Trim();
         enc.DiagnosisText = req.Diagnosis.Trim();
         enc.DoctorNote = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note.Trim();
@@ -186,7 +187,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         return ApiOk(new { enc.EncounterId }, "Đã lưu chẩn đoán.");
     }
 
-    // ========= 3) Tạo chỉ định xét nghiệm =========
+    // ========= Tạo chỉ định xét nghiệm =========
 
     [HttpPost("encounters/lab-orders")]
     [SwaggerOperation(Summary = "Tạo chỉ định xét nghiệm cho Encounter của lịch")]
@@ -194,7 +195,6 @@ public sealed class DoctorWorkspaceController : ControllerBase
     {
         if (req.AppointmentId <= 0) return Bad("Thiếu hoặc sai AppointmentId.");
 
-        // ✅ Cho phép KHÔNG có TestIds nếu có Note
         if ((req.TestIds == null || req.TestIds.Count == 0) && string.IsNullOrWhiteSpace(req.Note))
             return Bad("Vui lòng chọn ít nhất 1 xét nghiệm HOẶC ghi rõ lý do không xét nghiệm.");
 
@@ -216,17 +216,13 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
         if (enc == null) return Bad("Chưa có Encounter. Vui lòng lưu chẩn đoán trước khi chỉ định xét nghiệm.");
 
-        // ✅ Nếu không có xét nghiệm, chỉ lưu ghi chú vào Encounter
+        // Nếu không có xét nghiệm chỉ lưu ghi chú vào Encounter
         if (req.TestIds == null || req.TestIds.Count == 0)
         {
-            // Có thể lưu Note vào Encounter hoặc một bảng khác
-            // Ví dụ: thêm field LabNote vào Encounter
-            // enc.LabNote = req.Note?.Trim();
             await _db.SaveChangesAsync();
             return ApiOk(null, "Đã ghi nhận không có xét nghiệm.");
         }
 
-        // Kiểm tra test id hợp lệ
         var validTests = await _db.LabTests
             .Where(t => req.TestIds.Contains(t.LabTestId))
             .Select(t => new { t.LabTestId, t.Name, t.Code })
@@ -251,7 +247,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         _db.LabOrders.Add(order);
         await _db.SaveChangesAsync();
 
-        // Thêm item + link EncounterLabTest
+        // Thêm item, link EncounterLabTest
         foreach (var t in validTests)
         {
             var oli = new LabOrderItem
@@ -280,8 +276,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         return ApiOk(new { order.LabOrderId, order.Code }, "Đã tạo chỉ định xét nghiệm.");
     }
 
-    // ========= 4) Kê toa =========
-
+    // ========= Kê toa =========
     [HttpPost("encounters/prescriptions")]
     [SwaggerOperation(Summary = "Tạo toa thuốc cho Encounter của lịch")]
     public async Task<IActionResult> CreatePrescription([FromBody] PrescriptionReq req)
@@ -304,63 +299,75 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
         var enc = await _db.Encounters
             .FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
-
         if (enc == null) return Bad("Chưa có Encounter. Vui lòng lưu chẩn đoán trước khi kê toa.");
 
-        // Validate thuốc tồn tại
+        // Validate medicines
         var medIds = req.Lines.Select(x => x.MedicineId).Distinct().ToList();
-        var existedMeds = await _db.Medicines.Where(m => medIds.Contains(m.MedicineId))
-                            .Select(m => m.MedicineId).ToListAsync();
-        var missMeds = medIds.Except(existedMeds).ToArray();
-        if (missMeds.Length > 0) return Bad($"Các thuốc không tồn tại: {string.Join(", ", missMeds)}.");
+        var existed = await _db.Medicines
+            .Where(m => medIds.Contains(m.MedicineId))
+            .Select(m => m.MedicineId)
+            .ToListAsync();
 
-        using var tx = await _db.Database.BeginTransactionAsync();
+        var missing = medIds.Except(existed).ToArray();
+        if (missing.Any()) return Bad($"Thuốc không tồn tại: {string.Join(", ", missing)}.");
 
-        // ✅ Tạo prescription với đầy đủ thông tin
-        var now = DateTime.UtcNow;
-        var prescriptionCode = $"RX{now:yyMMddHHmmssfff}"; // Tạo mã unique
+        //
+        var strategy = _db.Database.CreateExecutionStrategy();
 
-        var rx = new EncounterPrescription
+        return await strategy.ExecuteAsync(async () =>
         {
-            EncounterId = enc.EncounterId,
-            Code = prescriptionCode,  // ✅ Set Code để tránh constraint
-            Advice = string.IsNullOrWhiteSpace(req.Advice) ? null : req.Advice!.Trim(),
-            CreatedAt = now,          // ✅ Set CreatedAt
-            ExpiryAt = now.AddMonths(3), // ✅ Toa thuốc hết hạn sau 3 tháng (tuỳ quy định)
-            ErxCode = null,           // ✅ Chưa có e-prescription
-            ErxStatus = null,
-            Warning = null
-        };
-        _db.EncounterPrescriptions.Add(rx);
-        await _db.SaveChangesAsync();
-
-        // ✅ Thêm items
-        foreach (var line in req.Lines)
-        {
-            var item = new PrescriptionItem
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+            try
             {
-                PrescriptionId = rx.PrescriptionId,
-                MedicineId = line.MedicineId,
-                CustomName = null,  // Có thể để null nếu dùng Medicine
-                DoseText = line.Dose.Trim(),
-                FrequencyText = line.Frequency.Trim(),
-                DurationText = line.Duration.Trim(),
-                Note = string.IsNullOrWhiteSpace(line.Note) ? null : line.Note!.Trim(),
-                Quantity = null,    // ✅ Có thể tính sau
-                UnitPrice = null,   // ✅ Có thể lấy từ Medicine nếu cần
-                CreatedAt = now     // ✅ Set CreatedAt
-            };
-            _db.PrescriptionItems.Add(item);
-        }
+                var now = DateTime.UtcNow;
+                var rxCode = $"RX{now:yyMMddHHmmssfff}";
 
-        await _db.SaveChangesAsync();
-        await tx.CommitAsync();
+                var rx = new EncounterPrescription
+                {
+                    EncounterId = enc.EncounterId,
+                    Code = rxCode,
+                    Advice = string.IsNullOrWhiteSpace(req.Advice) ? null : req.Advice.Trim(),
+                    CreatedAt = now,
+                    ExpiryAt = now.AddMonths(3),
+                    ErxCode = null,
+                    ErxStatus = null,
+                    Warning = null
+                };
+                _db.EncounterPrescriptions.Add(rx);
+                await _db.SaveChangesAsync();
 
-        return ApiOk(new { rx.PrescriptionId, rx.Code }, "Đã lưu toa thuốc.");
+                foreach (var line in req.Lines)
+                {
+                    var item = new PrescriptionItem
+                    {
+                        PrescriptionId = rx.PrescriptionId,
+                        MedicineId = line.MedicineId,
+                        CustomName = null,
+                        DoseText = line.Dose.Trim(),
+                        FrequencyText = line.Frequency.Trim(),
+                        DurationText = line.Duration.Trim(),
+                        Note = string.IsNullOrWhiteSpace(line.Note) ? null : line.Note.Trim(),
+                        Quantity = null,
+                        UnitPrice = null,
+                        CreatedAt = now
+                    };
+                    _db.PrescriptionItems.Add(item);
+                }
+
+                await _db.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return ApiOk(new { rx.PrescriptionId, rx.Code }, "Đã lưu toa thuốc.");
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return ApiError(500, "Lỗi lưu toa thuốc: " + (ex.InnerException?.Message ?? ex.Message));
+            }
+        });
     }
 
-    // ========= 5) Hoàn tất khám =========
-
+    // ========= Hoàn tất khám =========
     [HttpPost("encounters/complete")]
     [SwaggerOperation(Summary = "Hoàn tất khám: đổi trạng thái lịch 'done'")]
     public async Task<IActionResult> CompleteEncounter([FromBody] StartEncounterReq req)

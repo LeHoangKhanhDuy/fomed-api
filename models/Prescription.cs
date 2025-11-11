@@ -13,7 +13,7 @@ public class EncounterPrescription
     public string? ErxStatus { get; set; }     
     public DateTime? ExpiryAt { get; set; }
     public string? Warning { get; set; }
-    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public virtual Encounter Encounter { get; set; } = default!;
     public virtual ICollection<PrescriptionItem> Items { get; set; } = new List<PrescriptionItem>();
@@ -32,7 +32,7 @@ public class PrescriptionItem
     public string? Note { get; set; }
     public decimal? Quantity { get; set; }
     public decimal? UnitPrice { get; set; }
-    public DateTime CreatedAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public virtual EncounterPrescription Prescription { get; set; } = default!;
     public virtual Medicine? Medicine { get; set; }
