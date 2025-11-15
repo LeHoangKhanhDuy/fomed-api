@@ -369,7 +369,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
     // ========= Hoàn tất khám =========
     [HttpPost("encounters/complete")]
-    [SwaggerOperation(Summary = "Hoàn tất khám: đổi trạng thái lịch 'done'")]
+    [SwaggerOperation(Summary = "Hoàn tất khám: đổi trạng thái lịch 'done' và (tùy cấu hình) tạo hóa đơn thanh toán")]
     public async Task<IActionResult> CompleteEncounter([FromBody] StartEncounterReq req)
     {
         if (req.AppointmentId <= 0) return Bad("Thiếu hoặc sai AppointmentId.");
@@ -383,10 +383,220 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
+        if (appt.Status is "cancelled" or "no_show") return Bad("Lịch hẹn đã hủy hoặc vắng mặt.");
 
-        appt.Status = "done";  // constraint đã có ('waiting','booked','done','cancelled','no_show')
-        await _db.SaveChangesAsync();
+        // tránh tạo nhiều hóa đơn cho cùng appointment
+        var existingInv = await _db.Invoices.FirstOrDefaultAsync(i => i.AppointmentId == appt.AppointmentId);
+        if (existingInv != null)
+        {
+            return ApiOk(new { appt.AppointmentId, appt.Status, invoiceId = existingInv.InvoiceId, invoiceCode = existingInv.Code },
+                         "Đã hoàn tất khám (hóa đơn đã tồn tại).");
+        }
 
-        return ApiOk(new { appt.AppointmentId, appt.Status }, "Đã hoàn tất khám.");
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                appt.Status = "done";
+                var now = DateTime.UtcNow;
+
+                // ensure Encounter exists
+                var enc = await _db.Encounters.FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
+                if (enc == null)
+                {
+                    enc = new Encounter
+                    {
+                        AppointmentId = appt.AppointmentId,
+                        PatientId = appt.PatientId,
+                        DoctorId = appt.DoctorId,
+                        ServiceId = appt.ServiceId,
+                        CreatedAt = now
+                    };
+                    _db.Encounters.Add(enc);
+                    await _db.SaveChangesAsync();
+                }
+
+                // tạo Invoice
+                var invoiceCode = $"INV{now:yyMMddHHmmssfff}";
+                var invoice = new Invoice
+                {
+                    AppointmentId = appt.AppointmentId,
+                    EncounterId = enc.EncounterId,
+                    PatientId = appt.PatientId,
+                    Code = invoiceCode,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    Status = "unpaid",
+                    Subtotal = 0m,
+                    DiscountAmt = 0m,
+                    TaxAmt = 0m,
+                    TotalAmount = 0m
+                };
+
+                // LẤY TÊN BỆNH NHÂN 
+                if (appt.PatientId > 0)
+                {
+                    var patient = await _db.Patients.AsNoTracking()
+                                      .Where(p => p.PatientId == appt.PatientId)
+                                      .Select(p => new { p.FullName })
+                                      .FirstOrDefaultAsync();
+                    invoice.PatientName = patient?.FullName ?? "";
+                }
+                else
+                {
+                    invoice.PatientName = "";
+                }
+                _db.Invoices.Add(invoice);
+                await _db.SaveChangesAsync(); // để có InvoiceId
+
+                var itemsToAdd = new List<InvoiceItem>();
+                decimal subtotal = 0m;
+
+                // 1) Service charge 
+                if (appt.ServiceId > 0)
+                {
+                    var service = await _db.Set<Service>().AsNoTracking()
+                                      .FirstOrDefaultAsync(s => s.ServiceId == appt.ServiceId);
+                    if (service != null)
+                    {
+                        var servicePriceProp = service.GetType().GetProperty("Price");
+                        if (servicePriceProp != null)
+                        {
+                            var val = servicePriceProp.GetValue(service);
+                            if (val != null && decimal.TryParse(val.ToString(), out var price) && price > 0)
+                            {
+                                var it = new InvoiceItem
+                                {
+                                    InvoiceId = invoice.InvoiceId,
+                                    ItemType = "service",
+                                    RefType = "Service",
+                                    RefId = appt.ServiceId,
+                                    Description = $"Khám: {service.GetType().GetProperty("Name")?.GetValue(service) ?? "Service"}",
+                                    Quantity = 1,
+                                    UnitPrice = price,
+                                    CreatedAt = now
+                                };
+                                itemsToAdd.Add(it);
+                                subtotal += it.Quantity * it.UnitPrice;
+                            }
+                        }
+                    }
+                }
+
+                // 2) Lab orders -> sử dụng LabOrder.Items
+                var labOrders = await _db.LabOrders
+                    .Where(lo => lo.EncounterId == enc.EncounterId)
+                    .Include(lo => lo.Items)
+                    .ToListAsync();
+
+                foreach (var lo in labOrders)
+                {
+                    foreach (var loi in lo.Items)
+                    {
+                        decimal unitPrice = 0m;
+                        var labTest = await _db.Set<LabTest>().AsNoTracking()
+                                            .FirstOrDefaultAsync(t => t.Name == loi.TestName);
+                        if (labTest != null)
+                        {
+                            var pprop = labTest.GetType().GetProperty("Price");
+                            if (pprop != null)
+                            {
+                                var pv = pprop.GetValue(labTest);
+                                if (pv != null && decimal.TryParse(pv.ToString(), out var p) && p > 0) unitPrice = p;
+                            }
+                        }
+
+                        if (unitPrice > 0)
+                        {
+                            var it = new InvoiceItem
+                            {
+                                InvoiceId = invoice.InvoiceId,
+                                ItemType = "lab",
+                                RefType = "LabOrderItem",
+                                RefId = loi.LabOrderItemId,
+                                Description = $"Xét nghiệm: {loi.TestName}",
+                                Quantity = 1,
+                                UnitPrice = unitPrice,
+                                CreatedAt = now
+                            };
+                            itemsToAdd.Add(it);
+                            subtotal += it.Quantity * it.UnitPrice;
+                        }
+                    }
+                }
+
+                // 3) Prescription items
+                var prescriptions = await _db.EncounterPrescriptions
+                    .Where(p => p.EncounterId == enc.EncounterId)
+                    .Include(p => p.Items)
+                    .ToListAsync();
+
+                foreach (var p in prescriptions)
+                {
+                    foreach (var pi in p.Items)
+                    {
+                        var qty = pi.Quantity ?? 1m;
+                        var unitPrice = pi.UnitPrice ?? 0m;
+
+                        if (unitPrice == 0m && pi.MedicineId.HasValue)
+                        {
+                            var med = await _db.Medicines.AsNoTracking()
+                                        .FirstOrDefaultAsync(m => m.MedicineId == pi.MedicineId.Value);
+                            if (med != null)
+                            {
+                                var pprop = med.GetType().GetProperty("Price");
+                                if (pprop != null)
+                                {
+                                    var pv = pprop.GetValue(med);
+                                    if (pv != null && decimal.TryParse(pv.ToString(), out var pval) && pval > 0)
+                                        unitPrice = pval;
+                                }
+                            }
+                        }
+
+                        if (unitPrice > 0)
+                        {
+                            var it = new InvoiceItem
+                            {
+                                InvoiceId = invoice.InvoiceId,
+                                ItemType = "medicine",
+                                RefType = "PrescriptionItem",
+                                RefId = pi.ItemId,
+                                Description = $"Thuốc: {pi.CustomName ?? pi.Medicine?.GetType().GetProperty("Name")?.GetValue(pi.Medicine)?.ToString() ?? "Medicine"}",
+                                Quantity = qty,
+                                UnitPrice = unitPrice,
+                                CreatedAt = now
+                            };
+                            itemsToAdd.Add(it);
+                            subtotal += it.Quantity * it.UnitPrice;
+                        }
+                    }
+                }
+
+                if (itemsToAdd.Any())
+                {
+                    _db.InvoiceItems.AddRange(itemsToAdd);
+                }
+
+                // Cập nhật subtotal & total 
+                invoice.Subtotal = subtotal;
+                invoice.TotalAmount = subtotal - invoice.DiscountAmt + invoice.TaxAmt;
+                invoice.UpdatedAt = DateTime.UtcNow;
+                _db.Invoices.Update(invoice);
+
+                await _db.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                return ApiOk(new { appt.AppointmentId, appt.Status, invoiceId = invoice.InvoiceId, invoiceCode = invoice.Code },
+                             "Đã hoàn tất khám và tạo hóa đơn (nếu có item có giá).");
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                return ApiError(500, "Lỗi khi hoàn tất khám / tạo hóa đơn: " + (ex.InnerException?.Message ?? ex.Message));
+            }
+        });
     }
 }

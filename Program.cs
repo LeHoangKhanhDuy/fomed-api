@@ -10,6 +10,7 @@ using FoMed.Api.Models;
 using System.Text;
 using Microsoft.OpenApi.Any;
 using Microsoft.Extensions.FileProviders;
+using FoMed.Api.Features.Appointments;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -165,6 +166,9 @@ builder.Services.Configure<ApiBehaviorOptions>(opt =>
 
 // DI cho token service
 builder.Services.AddScoped<ITokenService, TokenService>();
+
+// Đăng ký dịch vụ chạy nền
+builder.Services.AddHostedService<AppointmentCleanupService>();
 
 // ================== BUILD & PIPELINE ==================
 var app = builder.Build();
