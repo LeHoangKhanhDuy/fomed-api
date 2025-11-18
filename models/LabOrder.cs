@@ -28,6 +28,7 @@ public class LabOrderItem
 {
     public long LabOrderItemId { get; set; }
     public long LabOrderId { get; set; }
+    public int? LabTestId { get; set; }
     public int DisplayOrder { get; set; }
     public string TestName { get; set; } = null!;
     public string ResultValue { get; set; } = null!;
@@ -41,4 +42,5 @@ public class LabOrderItem
     public DateTime CreatedAt { get; set; }
 
     public LabOrder LabOrder { get; set; } = null!;
+    public LabTest? LabTest { get; set; }
 }

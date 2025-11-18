@@ -1648,6 +1648,9 @@ namespace FoMed_WebAPI.Migrations
                     b.Property<long>("LabOrderId")
                         .HasColumnType("bigint");
 
+                    b.Property<int?>("LabTestId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Note")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -1677,6 +1680,8 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("nvarchar(50)");
 
                     b.HasKey("LabOrderItemId");
+
+                    b.HasIndex("LabTestId");
 
                     b.HasIndex("LabOrderId", "DisplayOrder", "LabOrderItemId")
                         .HasDatabaseName("IX_LabOrderItems_Order");
@@ -2177,7 +2182,13 @@ namespace FoMed_WebAPI.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("FoMed.Api.Models.LabTest", "LabTest")
+                        .WithMany()
+                        .HasForeignKey("LabTestId");
+
                     b.Navigation("LabOrder");
+
+                    b.Navigation("LabTest");
                 });
 
             modelBuilder.Entity("UserProfile", b =>

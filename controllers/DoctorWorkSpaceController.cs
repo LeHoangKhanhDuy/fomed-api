@@ -211,8 +211,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
-        var enc = await _db.Encounters
-            .FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
+        var enc = await _db.Encounters.FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
 
         if (enc == null) return Bad("Chưa có Encounter. Vui lòng lưu chẩn đoán trước khi chỉ định xét nghiệm.");
 
@@ -242,7 +241,11 @@ public sealed class DoctorWorkspaceController : ControllerBase
             Code = code,
             Note = string.IsNullOrWhiteSpace(req.Note) ? null : req.Note!.Trim(),
             SampleType = null,
-            Status = LabStatus.Processing
+            Status = LabStatus.Processing,
+            DoctorId = doctorId,
+            ServiceId = enc.ServiceId ?? 0,
+            SampleTakenAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
         };
         _db.LabOrders.Add(order);
         await _db.SaveChangesAsync();
@@ -253,12 +256,14 @@ public sealed class DoctorWorkspaceController : ControllerBase
             var oli = new LabOrderItem
             {
                 LabOrderId = order.LabOrderId,
+                LabTestId = t.LabTestId,
                 TestName = t.Name,
                 ResultValue = "-",
                 Unit = "",
                 ReferenceText = "",
                 Note = "",
-                DisplayOrder = 0
+                DisplayOrder = 0,
+                CreatedAt = DateTime.UtcNow
             };
             _db.LabOrderItems.Add(oli);
 
@@ -266,7 +271,8 @@ public sealed class DoctorWorkspaceController : ControllerBase
             {
                 EncounterId = enc.EncounterId,
                 LabTestId = t.LabTestId,
-                Status = "ordered"
+                Status = "ordered",
+                CreatedAt = DateTime.UtcNow
             });
         }
 
@@ -457,57 +463,62 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 // 1) Service charge 
                 if (appt.ServiceId > 0)
                 {
-                    var service = await _db.Set<Service>().AsNoTracking()
-                                      .FirstOrDefaultAsync(s => s.ServiceId == appt.ServiceId);
-                    if (service != null)
+                    // Dùng DbSet<Service> cụ thể, không dùng _db.Set<Service>()
+                    var service = await _db.Services.AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.ServiceId == appt.ServiceId);
+
+                    // Truy cập trực tiếp service.BasePrice và kiểm tra null (HasValue)
+                    if (service != null && service.BasePrice.HasValue && service.BasePrice.Value > 0)
                     {
-                        var servicePriceProp = service.GetType().GetProperty("Price");
-                        if (servicePriceProp != null)
+                        var it = new InvoiceItem
                         {
-                            var val = servicePriceProp.GetValue(service);
-                            if (val != null && decimal.TryParse(val.ToString(), out var price) && price > 0)
-                            {
-                                var it = new InvoiceItem
-                                {
-                                    InvoiceId = invoice.InvoiceId,
-                                    ItemType = "service",
-                                    RefType = "Service",
-                                    RefId = appt.ServiceId,
-                                    Description = $"Khám: {service.GetType().GetProperty("Name")?.GetValue(service) ?? "Service"}",
-                                    Quantity = 1,
-                                    UnitPrice = price,
-                                    CreatedAt = now
-                                };
-                                itemsToAdd.Add(it);
-                                subtotal += it.Quantity * it.UnitPrice;
-                            }
-                        }
+                            InvoiceId = invoice.InvoiceId,
+                            ItemType = "service",
+                            RefType = "Service",
+                            RefId = appt.ServiceId,
+                            // Lấy tên trực tiếp
+                            Description = $"Khám: {service.Name ?? "Service"}",
+                            Quantity = 1,
+                            // Lấy giá trị từ BasePrice.Value
+                            UnitPrice = service.BasePrice.Value,
+                            CreatedAt = now
+                        };
+                        itemsToAdd.Add(it);
+                        subtotal += it.Quantity * it.UnitPrice;
                     }
                 }
 
                 // 2) Lab orders -> sử dụng LabOrder.Items
                 var labOrders = await _db.LabOrders
-                    .Where(lo => lo.EncounterId == enc.EncounterId)
-                    .Include(lo => lo.Items)
-                    .ToListAsync();
+                .Where(lo => lo.EncounterId == enc.EncounterId)
+                .Include(lo => lo.Items)
+                .ThenInclude(item => item.LabTest) 
+                .ToListAsync();
 
                 foreach (var lo in labOrders)
                 {
                     foreach (var loi in lo.Items)
                     {
                         decimal unitPrice = 0m;
-                        var labTest = await _db.Set<LabTest>().AsNoTracking()
-                                            .FirstOrDefaultAsync(t => t.Name == loi.TestName);
-                        if (labTest != null)
+
+                        // LabTestId + Navigation Property
+                        if (loi.LabTestId.HasValue && loi.LabTest != null)
                         {
-                            var pprop = labTest.GetType().GetProperty("Price");
-                            if (pprop != null)
+                            unitPrice = loi.LabTest.BasePrice ?? 0m;
+                        }
+                        else
+                        {
+                            // Nếu không có LabTestId, thử tìm theo tên 
+                            var labTest = await _db.LabTests.AsNoTracking()
+                                .FirstOrDefaultAsync(t => t.Name == loi.TestName);
+
+                            if (labTest != null && labTest.BasePrice.HasValue)
                             {
-                                var pv = pprop.GetValue(labTest);
-                                if (pv != null && decimal.TryParse(pv.ToString(), out var p) && p > 0) unitPrice = p;
+                                unitPrice = labTest.BasePrice.Value;
                             }
                         }
 
+                        // Chỉ thêm vào hóa đơn nếu có giá
                         if (unitPrice > 0)
                         {
                             var it = new InvoiceItem
@@ -529,9 +540,9 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
                 // 3) Prescription items
                 var prescriptions = await _db.EncounterPrescriptions
-                    .Where(p => p.EncounterId == enc.EncounterId)
-                    .Include(p => p.Items)
-                    .ToListAsync();
+                .Where(p => p.EncounterId == enc.EncounterId)
+                .Include(p => p.Items)
+                .ToListAsync();
 
                 foreach (var p in prescriptions)
                 {
@@ -540,18 +551,20 @@ public sealed class DoctorWorkspaceController : ControllerBase
                         var qty = pi.Quantity ?? 1m;
                         var unitPrice = pi.UnitPrice ?? 0m;
 
+                        string medicineName = "Medicine"; // Tên dự phòng
+
                         if (unitPrice == 0m && pi.MedicineId.HasValue)
                         {
                             var med = await _db.Medicines.AsNoTracking()
-                                        .FirstOrDefaultAsync(m => m.MedicineId == pi.MedicineId.Value);
+                                .FirstOrDefaultAsync(m => m.MedicineId == pi.MedicineId.Value);
+
                             if (med != null)
                             {
-                                var pprop = med.GetType().GetProperty("Price");
-                                if (pprop != null)
+                                medicineName = med.Name ?? "Medicine";
+
+                                if (med.BasePrice > 0)
                                 {
-                                    var pv = pprop.GetValue(med);
-                                    if (pv != null && decimal.TryParse(pv.ToString(), out var pval) && pval > 0)
-                                        unitPrice = pval;
+                                    unitPrice = med.BasePrice;
                                 }
                             }
                         }
@@ -564,7 +577,8 @@ public sealed class DoctorWorkspaceController : ControllerBase
                                 ItemType = "medicine",
                                 RefType = "PrescriptionItem",
                                 RefId = pi.ItemId,
-                                Description = $"Thuốc: {pi.CustomName ?? pi.Medicine?.GetType().GetProperty("Name")?.GetValue(pi.Medicine)?.ToString() ?? "Medicine"}",
+                                // Lấy tên an toàn
+                                Description = $"Thuốc: {pi.CustomName ?? medicineName}",
                                 Quantity = qty,
                                 UnitPrice = unitPrice,
                                 CreatedAt = now
