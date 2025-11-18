@@ -70,20 +70,55 @@ public class EncounterController : ControllerBase
         var q = _db.Encounters.AsNoTracking().Where(e => e.PatientId == targetPid);
 
         var total = await q.CountAsync(ct);
-        var items = await q
-            .OrderByDescending(e => e.FinalizedAt ?? e.CreatedAt)
-            .ThenByDescending(e => e.EncounterId)
+
+        // Tạm thời sort theo ID hoặc CreatedAt để an toàn cho SQL
+        var rawItems = await q
+            .OrderByDescending(e => e.EncounterId)
             .Skip((page - 1) * limit)
             .Take(limit)
-            .Select(e => new EncounterListItemDto
+            .Select(e => new
             {
-                Code = string.IsNullOrWhiteSpace(e.Code) ? ("HSFM-" + e.EncounterId) : e.Code!,
-                VisitAt = e.FinalizedAt ?? e.CreatedAt,
-                DoctorName = e.Doctor.User!.FullName,
-                ServiceName = e.Service != null ? e.Service.Name : string.Empty,
-                Status = e.Status ?? "draft"
+                e.EncounterId,
+                e.Code,
+                e.Status,
+                e.FinalizedAt,
+                e.CreatedAt,
+
+                DoctorName = e.Doctor.User != null ? e.Doctor.User.FullName : "",
+                ServiceName = e.Service != null ? e.Service.Name : "",
+
+                HasAppt = e.Appointment != null,
+                ApptDate = e.Appointment != null ? (DateOnly?)e.Appointment.VisitDate : null,
+                ApptTime = e.Appointment != null ? (TimeOnly?)e.Appointment.VisitTime : null
             })
             .ToListAsync(ct);
+
+        var items = rawItems.Select(item =>
+        {
+            DateTime finalVisitAt;
+
+            if (item.HasAppt && item.ApptDate.HasValue && item.ApptTime.HasValue)
+            {
+                // Gộp Date + Time 
+                finalVisitAt = item.ApptDate.Value.ToDateTime(item.ApptTime.Value);
+            }
+            else
+            {
+                // Fallback
+                finalVisitAt = item.FinalizedAt ?? item.CreatedAt;
+            }
+
+            return new EncounterListItemDto
+            {
+                Code = string.IsNullOrWhiteSpace(item.Code) ? ("HSFM-" + item.EncounterId) : item.Code!,
+                VisitAt = finalVisitAt,
+                DoctorName = item.DoctorName,
+                ServiceName = item.ServiceName,
+                Status = item.Status ?? "draft"
+            };
+        })
+        .OrderByDescending(x => x.VisitAt)
+        .ToList();
 
         return Ok(new
         {
@@ -120,7 +155,7 @@ public class EncounterController : ControllerBase
             if (long.TryParse(codeOrId, out var parsed))
             {
                 encounterId = parsed;
-                _logger.LogInformation("✅ Parsed as ID: {EncounterId}", encounterId);
+                _logger.LogInformation("Parsed as ID: {EncounterId}", encounterId);
             }
             else
             {
@@ -134,7 +169,7 @@ public class EncounterController : ControllerBase
 
             if (encounterId is null)
             {
-                _logger.LogWarning("❌ Encounter not found: {CodeOrId}", codeOrId);
+                _logger.LogWarning("Encounter not found: {CodeOrId}", codeOrId);
                 return NotFound(new { success = false, message = "Không tìm thấy hồ sơ." });
             }
 
@@ -146,49 +181,46 @@ public class EncounterController : ControllerBase
 
             if (encounterExists is null)
             {
-                _logger.LogWarning("❌ Encounter {EncounterId} does not exist", encounterId);
+                _logger.LogWarning("Encounter {EncounterId} does not exist", encounterId);
                 return NotFound(new { success = false, message = "Không tìm thấy hồ sơ." });
             }
 
-            _logger.LogInformation("✅ Encounter exists: ID={EncounterId}, PatientId={PatientId}",
+            _logger.LogInformation("Encounter exists: ID={EncounterId}, PatientId={PatientId}",
                 encounterExists.EncounterId, encounterExists.PatientId);
 
             // Check authorization
             if (!IsStaff())
             {
                 var selfPatientId = await GetSelfPatientIdAsync(ct);
-                _logger.LogInformation("👤 User's PatientId: {SelfPatientId}, Encounter's PatientId: {EncounterPatientId}",
+                _logger.LogInformation("User's PatientId: {SelfPatientId}, Encounter's PatientId: {EncounterPatientId}",
                     selfPatientId, encounterExists.PatientId);
 
                 if (selfPatientId is null || selfPatientId != encounterExists.PatientId)
                 {
-                    _logger.LogWarning("🚫 Forbidden: User does not have access to encounter {EncounterId}", encounterId);
+                    _logger.LogWarning("Forbidden: User does not have access to encounter {EncounterId}", encounterId);
                     return Forbid();
                 }
             }
 
-            // Now load full encounter with all navigation properties
             _logger.LogInformation("📦 Loading full encounter data...");
 
             var encounter = await _db.Encounters.AsNoTracking()
+                .Include(e => e.Appointment)
                 .Include(e => e.Patient)
-                .Include(e => e.Doctor)
-                    .ThenInclude(d => d.User)
+                .Include(e => e.Doctor).ThenInclude(d => d.User)
                 .Include(e => e.Doctor.PrimarySpecialty)
                 .Include(e => e.Service)
-                .Include(e => e.Prescriptions)
-                    .ThenInclude(p => p.Items)
-                        .ThenInclude(i => i.Medicine)
+                .Include(e => e.Prescriptions).ThenInclude(p => p.Items).ThenInclude(i => i.Medicine)
                 .Where(e => e.EncounterId == encounterId.Value)
                 .FirstOrDefaultAsync(ct);
 
             if (encounter is null)
             {
-                _logger.LogError("💥 Failed to load encounter {EncounterId} with includes", encounterId);
+                _logger.LogError("Failed to load encounter {EncounterId} with includes", encounterId);
                 return NotFound(new { success = false, message = "Không thể tải thông tin hồ sơ." });
             }
 
-            _logger.LogInformation("✅ Encounter loaded successfully. Prescriptions: {Count}",
+            _logger.LogInformation("Encounter loaded successfully. Prescriptions: {Count}",
                 encounter.Prescriptions.Count);
 
             // Get latest prescription
@@ -198,12 +230,12 @@ public class EncounterController : ControllerBase
 
             if (latestPrescription != null)
             {
-                _logger.LogInformation("💊 Latest prescription: ID={PrescriptionId}, Items={ItemCount}",
+                _logger.LogInformation("Latest prescription: ID={PrescriptionId}, Items={ItemCount}",
                     latestPrescription.PrescriptionId, latestPrescription.Items.Count);
             }
             else
             {
-                _logger.LogInformation("⚠️ No prescriptions found for encounter {EncounterId}", encounterId);
+                _logger.LogInformation("No prescriptions found for encounter {EncounterId}", encounterId);
             }
 
             // Build response DTO
@@ -212,7 +244,9 @@ public class EncounterController : ControllerBase
                 EncounterCode = string.IsNullOrWhiteSpace(encounter.Code)
                     ? ("HSFM-" + encounter.EncounterId)
                     : encounter.Code!,
-                VisitAt = encounter.FinalizedAt ?? encounter.CreatedAt,
+                VisitAt = encounter.Appointment != null
+                ? encounter.Appointment.VisitDate.ToDateTime(encounter.Appointment.VisitTime)
+                : (encounter.FinalizedAt ?? encounter.CreatedAt),
 
                 // Prescription header
                 PrescriptionCode = latestPrescription != null
@@ -262,13 +296,13 @@ public class EncounterController : ControllerBase
                     }).ToList() ?? new List<EncounterDetailDrugDto>()
             };
 
-            _logger.LogInformation("✅ Response built successfully with {ItemCount} items", dto.Items.Count);
+            _logger.LogInformation("Response built successfully with {ItemCount} items", dto.Items.Count);
 
             return Ok(new { success = true, message = "OK", data = dto });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "💥 Error in GetEncounterDetail for {CodeOrId}", codeOrId);
+            _logger.LogError(ex, "Error in GetEncounterDetail for {CodeOrId}", codeOrId);
             return StatusCode(500, new
             {
                 success = false,
