@@ -12,8 +12,8 @@ public sealed class DoctorListItemDto
     public int RatingCount { get; init; }
     public string? AvatarUrl { get; init; }
     public string? Intro { get; set; }
-    public List<DoctorEducationDto> Educations { get; init; } = new(); 
-    public List<DoctorExpertiseDto> Expertises { get; init; } = new(); 
+    public List<DoctorEducationDto> Educations { get; init; } = new();
+    public List<DoctorExpertiseDto> Expertises { get; init; } = new();
     public List<DoctorAchievementDto> Achievements { get; init; } = new();
 }
 
@@ -25,6 +25,7 @@ public sealed class DoctorEducationDto
     public int? YearTo { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Detail { get; set; }
+    public int SortOrder { get; set; }
     public Doctor? Doctor { get; set; }
 }
 
@@ -34,6 +35,7 @@ public sealed class DoctorAchievementDto
     public int DoctorId { get; set; }
     public string? YearLabel { get; set; }
     public string Content { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
 }
 
 public sealed class DoctorExpertiseDto
@@ -41,6 +43,7 @@ public sealed class DoctorExpertiseDto
     public long DoctorExpertiseId { get; set; }
     public int DoctorId { get; set; }
     public string Content { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
     public Doctor? Doctor { get; set; }
 }
 

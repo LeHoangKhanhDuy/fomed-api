@@ -156,20 +156,24 @@ public class FoMedContext : DbContext
 
         m.Entity<DoctorWeeklySlot>(e =>
         {
-            e.HasOne(x => x.Doctor).WithMany(x => x.WeeklySlots).HasForeignKey(x => x.DoctorId);
+            e.HasOne(x => x.Doctor).WithMany(x => x.WeeklySlots).HasForeignKey(x => x.DoctorId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         m.Entity<DoctorEducation>(e =>
         {
-            e.HasOne(x => x.Doctor).WithMany(x => x.Educations).HasForeignKey(x => x.DoctorId);
+            e.HasOne(x => x.Doctor).WithMany(x => x.Educations).HasForeignKey(x => x.DoctorId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
         m.Entity<DoctorExpertise>(e =>
         {
-            e.HasOne(x => x.Doctor).WithMany(x => x.Expertises).HasForeignKey(x => x.DoctorId);
+            e.HasOne(x => x.Doctor).WithMany(x => x.Expertises).HasForeignKey(x => x.DoctorId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
         m.Entity<DoctorAchievement>(e =>
         {
-            e.HasOne(x => x.Doctor).WithMany(x => x.Achievements).HasForeignKey(x => x.DoctorId);
+            e.HasOne(x => x.Doctor).WithMany(x => x.Achievements).HasForeignKey(x => x.DoctorId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
         m.Entity<DoctorRating>(e =>
         {

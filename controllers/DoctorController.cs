@@ -382,26 +382,29 @@ public class DoctorsController : ControllerBase
 
         // Bulk insert edu/expertise/achievement (nếu có)
         if (req.Educations?.Count > 0)
-            _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
+            _db.DoctorEducations.AddRange(req.Educations.Select((e, idx) => new DoctorEducation
             {
                 DoctorId = doctor.DoctorId,
                 YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
                 YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
                 Title = e.Title,
-                Detail = e.Detail
+                Detail = e.Detail,
+                SortOrder = e.SortOrder > 0 ? e.SortOrder : idx
             }));
         if (req.Expertises?.Count > 0)
-            _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
+            _db.DoctorExpertises.AddRange(req.Expertises.Select((x, idx) => new DoctorExpertise
             {
                 DoctorId = doctor.DoctorId,
-                Content = x.Content
+                Content = x.Content,
+                SortOrder = x.SortOrder > 0 ? x.SortOrder : idx
             }));
         if (req.Achievements?.Count > 0)
-            _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
+            _db.DoctorAchievements.AddRange(req.Achievements.Select((a, idx) => new DoctorAchievement
             {
                 DoctorId = doctor.DoctorId,
                 YearLabel = a.YearLabel,
-                Content = a.Content
+                Content = a.Content,
+                SortOrder = a.SortOrder > 0 ? a.SortOrder : idx
             }));
 
         await _db.SaveChangesAsync(ct);
@@ -449,13 +452,14 @@ public class DoctorsController : ControllerBase
             _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == id));
             if (req.Educations.Count > 0)
             {
-                _db.DoctorEducations.AddRange(req.Educations.Select(e => new DoctorEducation
+                _db.DoctorEducations.AddRange(req.Educations.Select((e, idx) => new DoctorEducation
                 {
                     DoctorId = id,
                     YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
                     YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
                     Title = e.Title,
-                    Detail = e.Detail
+                    Detail = e.Detail,
+                    SortOrder = e.SortOrder > 0 ? e.SortOrder : idx
                 }));
             }
         }
@@ -465,10 +469,11 @@ public class DoctorsController : ControllerBase
             _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(x => x.DoctorId == id));
             if (req.Expertises.Count > 0)
             {
-                _db.DoctorExpertises.AddRange(req.Expertises.Select(x => new DoctorExpertise
+                _db.DoctorExpertises.AddRange(req.Expertises.Select((x, idx) => new DoctorExpertise
                 {
                     DoctorId = id,
-                    Content = x.Content
+                    Content = x.Content,
+                    SortOrder = x.SortOrder > 0 ? x.SortOrder : idx
                 }));
             }
         }
@@ -478,11 +483,12 @@ public class DoctorsController : ControllerBase
             _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(a => a.DoctorId == id));
             if (req.Achievements.Count > 0)
             {
-                _db.DoctorAchievements.AddRange(req.Achievements.Select(a => new DoctorAchievement
+                _db.DoctorAchievements.AddRange(req.Achievements.Select((a, idx) => new DoctorAchievement
                 {
                     DoctorId = id,
                     YearLabel = a.YearLabel,
-                    Content = a.Content
+                    Content = a.Content,
+                    SortOrder = a.SortOrder > 0 ? a.SortOrder : idx
                 }));
             }
         }
