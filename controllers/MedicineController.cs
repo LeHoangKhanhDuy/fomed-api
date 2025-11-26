@@ -273,9 +273,7 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
                     .SetProperty(x => x.Note, note)
                     .SetProperty(x => x.BasePrice, price)
                     .SetProperty(x => x.IsActive, active)
-                #if true   // nếu entity Medicine có UpdatedAt
                     .SetProperty(x => x.UpdatedAt, DateTime.UtcNow)
-                #endif
                 );
 
             if (rows == 0)
@@ -372,19 +370,24 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Delete(int id)
     {
-        // chỉ lấy nhẹ cho nhanh
-        var med = await db.Medicines.AsNoTracking()
-            .Where(x => x.MedicineId == id)
-            .Select(x => new { x.MedicineId, x.Name, x.IsActive })
-            .FirstOrDefaultAsync();
-
-        if (med is null)
+        // Kiểm tra thuốc có tồn tại không 
+        var exists = await db.Medicines.AnyAsync(x => x.MedicineId == id);
+        if (!exists)
             return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc.", 404));
 
-        // kiểm tra ràng buộc tham chiếu
-        var hasLots = await db.MedicineLots.AnyAsync(x => x.MedicineId == id);
-        var hasTxns = await db.InventoryTransactions.AnyAsync(x => x.MedicineId == id);
-        var hasPrescs = await db.PrescriptionItems.AnyAsync(x => x.MedicineId == id);
+        // Kiểm tra ràng buộc tham chiếu 
+        var tLots = db.MedicineLots.AnyAsync(x => x.MedicineId == id);
+        var tTxns = db.InventoryTransactions.AnyAsync(x => x.MedicineId == id);
+        var tPrescs = db.PrescriptionItems.AnyAsync(x => x.MedicineId == id);
+        // Kiểm tra thêm InvoiceItems 
+        var tInvoices = db.InvoiceItems.AnyAsync(x => x.RefType == "PrescriptionItem" &&
+                                                      db.PrescriptionItems.Any(p => p.ItemId == x.RefId && p.MedicineId == id));
+
+        await Task.WhenAll(tLots, tTxns, tPrescs);
+
+        var hasLots = tLots.Result;
+        var hasTxns = tTxns.Result;
+        var hasPrescs = tPrescs.Result;
 
         if (hasLots || hasTxns || hasPrescs)
         {
@@ -400,21 +403,20 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
 
         try
         {
-            // xoá nhanh, không cần load entity đầy đủ
+            // Xoá cứng 
             var rows = await db.Medicines
                 .Where(x => x.MedicineId == id)
                 .ExecuteDeleteAsync();
 
             if (rows == 0)
-                return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc.", 404));
+                return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc (có thể đã bị xóa bởi người khác).", 404));
 
-            return Ok(ApiResponse<object>.Success(null, "Đã xóa thuốc thành công"));
+            return Ok(ApiResponse<object>.Success(new { }, "Đã xóa thuốc vĩnh viễn thành công"));
         }
         catch (DbUpdateException ex)
         {
-            // phòng trường hợp còn ràng buộc DB khác
             return StatusCode(StatusCodes.Status500InternalServerError,
-                ApiResponse<object>.Fail($"Lỗi cơ sở dữ liệu khi xóa thuốc: {ex.InnerException?.Message ?? ex.Message}", 500));
+                ApiResponse<object>.Fail($"Không thể xóa do ràng buộc dữ liệu (DB Constraint): {ex.InnerException?.Message ?? ex.Message}", 500));
         }
         catch (Exception ex)
         {
@@ -423,6 +425,63 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
         }
     }
 
+    // API Lấy danh sách lô 
+    // GET: api/v1/admin/medicines/5/lots
+    [HttpGet("{id:int}/lots")]
+    [SwaggerOperation(Summary = "Lấy danh sách lô của thuốc")]
+    public async Task<IActionResult> GetLots(int id)
+    {
+        var exists = await db.Medicines.AnyAsync(x => x.MedicineId == id);
+        if (!exists) return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc."));
+
+        var lots = await db.MedicineLots.AsNoTracking()
+            .Where(x => x.MedicineId == id)
+            .OrderBy(x => x.ExpiryDate)
+            .Select(x => new
+            {
+                x.LotId,
+                x.LotNumber,
+                x.ExpiryDate,
+                x.Quantity,
+                x.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(ApiResponse<object>.Success(lots, "Lấy danh sách lô thành công"));
+    }
+
+    // API Tạo lô mới
+    // POST: api/v1/admin/medicines/5/lots
+    [HttpPost("{id:int}/lots")]
+    [SwaggerOperation(Summary = "Tạo lô thuốc mới")]
+    public async Task<IActionResult> CreateLot(int id, [FromBody] MedicineLotRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.LotNumber))
+            return BadRequest(ApiResponse<object>.Fail("Số lô không được để trống."));
+
+        var medExists = await db.Medicines.AnyAsync(x => x.MedicineId == id);
+        if (!medExists) return NotFound(ApiResponse<object>.Fail("Thuốc không tồn tại."));
+
+        var dup = await db.MedicineLots.AnyAsync(x => x.MedicineId == id && x.LotNumber == req.LotNumber);
+        if (dup) return Conflict(ApiResponse<object>.Fail($"Số lô '{req.LotNumber}' đã tồn tại."));
+
+        try
+        {
+            var lot = new MedicineLot
+            {
+                MedicineId = id,
+                LotNumber = req.LotNumber.Trim(),
+                ExpiryDate = req.ExpiryDate,
+                Quantity = req.Quantity,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.MedicineLots.Add(lot);
+            await db.SaveChangesAsync();
+
+            return Ok(ApiResponse<object>.Success(new { lot.LotId, lot.LotNumber }, "Tạo lô thành công"));
+        }
+        catch (Exception ex) { return StatusCode(500, ApiResponse<object>.Fail(ex.Message, 500)); }
+    }
 
     // POST: api/medicines/5/inventory  (nhập/xuất/điều chỉnh kho)
     [HttpPost("inventory/{id:int}")]
@@ -433,59 +492,56 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> InventoryAdjust(int id, [FromBody] InvAdjustRequest req)
     {
-        try
+        if (req.Quantity == 0) return BadRequest(ApiResponse<object>.Fail("Quantity phải khác 0."));
+        if (!req.LotId.HasValue) return BadRequest(ApiResponse<object>.Fail("Bắt buộc phải chọn Lô thuốc (LotId)."));
+
+        var exist = await db.Medicines.AnyAsync(x => x.MedicineId == id);
+        if (!exist) return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc."));
+
+        // Validate âm kho tổng
+        if (req.Quantity < 0)
         {
-            // thuốc tồn tại?
-            var exist = await db.Medicines.AnyAsync(x => x.MedicineId == id);
-            if (!exist)
-                return NotFound(ApiResponse<object>.Fail("Không tìm thấy thuốc."));
+            var currentTotal = await db.InventoryTransactions.Where(t => t.MedicineId == id).SumAsync(t => (decimal?)t.Quantity) ?? 0m;
+            if (currentTotal + req.Quantity < 0) return BadRequest(ApiResponse<object>.Fail("Tổng tồn kho không đủ."));
+        }
 
-            // validate nhập liệu
-            if (req.TxnType is not ("in" or "out" or "adjust"))
-                return BadRequest(ApiResponse<object>.Fail("TxnType phải là 'in' | 'out' | 'adjust'."));
-
-            if (req.Quantity == 0)
-                return BadRequest(ApiResponse<object>.Fail("Quantity phải khác 0."));
-
-            // chặn âm kho khi xuất/giảm
-            if (req.Quantity < 0)
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            using var transaction = await db.Database.BeginTransactionAsync();
+            try
             {
-                var current = await db.InventoryTransactions
-                                      .Where(t => t.MedicineId == id)
-                                      .SumAsync(t => (decimal?)t.Quantity) ?? 0m;
+                // Ghi Log
+                db.InventoryTransactions.Add(new InventoryTransaction
+                {
+                    MedicineId = id,
+                    LotId = req.LotId,
+                    TxnType = req.TxnType,
+                    Quantity = req.Quantity,
+                    UnitCost = req.UnitCost,
+                    RefNote = req.RefNote
+                });
 
-                if (current + req.Quantity < 0)
-                    return BadRequest(ApiResponse<object>.Fail("Tồn kho không đủ."));
+                // Update Lô
+                var lot = await db.MedicineLots.FirstOrDefaultAsync(l => l.LotId == req.LotId);
+                if (lot == null) throw new Exception("Không tìm thấy Lô thuốc.");
+
+                lot.Quantity += req.Quantity;
+                if (lot.Quantity < 0) throw new Exception($"Lô {lot.LotNumber} không đủ hàng để xuất.");
+
+                await db.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                var newStock = await db.InventoryTransactions.Where(t => t.MedicineId == id).SumAsync(t => (decimal?)t.Quantity) ?? 0m;
+                return Ok(ApiResponse<object>.Success(new { MedicineId = id, Stock = newStock }, "Cập nhật kho thành công"));
             }
-
-            // ghi giao dịch
-            db.InventoryTransactions.Add(new InventoryTransaction
+            catch (Exception ex)
             {
-                MedicineId = id,
-                LotId = req.LotId,
-                TxnType = req.TxnType,
-                Quantity = req.Quantity,
-                UnitCost = req.UnitCost,
-                RefNote = req.RefNote
-            });
-            await db.SaveChangesAsync();
-
-            // tồn kho mới
-            var stock = await db.InventoryTransactions
-                                .Where(t => t.MedicineId == id)
-                                .SumAsync(t => (decimal?)t.Quantity) ?? 0m;
-
-            return Ok(ApiResponse<object>.Success(new { MedicineId = id, Stock = stock },"Cập nhật tồn kho thành công"));
-        }
-        catch (DbUpdateException ex)
-        {
-            // lỗi DB (ví dụ column không tồn tại, FK, v.v.)
-            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.Fail($"Lỗi cơ sở dữ liệu khi ghi tồn kho: {ex.InnerException?.Message ?? ex.Message}",500));
-        }
-        catch (Exception ex)
-        {
-            // lỗi không lường trước
-            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.Fail($"Đã xảy ra lỗi khi cập nhật tồn kho: {ex.Message}", 500));
-        }
+                await transaction.RollbackAsync();
+                return StatusCode(500, ApiResponse<object>.Fail(ex.Message, 500));
+            }
+        });
     }
+
+    
 }
