@@ -26,6 +26,7 @@ public sealed class MedicineItemResponse
     public decimal BasePrice { get; set; }
     public decimal Stock { get; set; }          // tính từ sổ kho
     public bool IsActive { get; set; }
+    public decimal PhysicalStock { get; set; }  
 }
 
 public sealed class MedicinePageResult<T>

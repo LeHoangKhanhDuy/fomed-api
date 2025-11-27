@@ -26,6 +26,8 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
             page = Math.Max(1, page);
             pageSize = Math.Clamp(pageSize, 1, 200);
 
+            var today = DateTime.Now.Date;
+
             var baseQuery = db.Medicines.AsNoTracking();
 
             var total = await baseQuery.CountAsync();
@@ -44,9 +46,10 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
                     Unit = x.Unit,
                     BasePrice = x.BasePrice,
                     IsActive = x.IsActive,
-                    Stock = db.InventoryTransactions
-                                   .Where(t => t.MedicineId == x.MedicineId)
-                                   .Sum(t => (decimal?)t.Quantity) ?? 0m
+                    Stock = x.Lots
+                        .Where(l => l.ExpiryDate == null || l.ExpiryDate >= today)
+                        .Sum(l => (decimal?)l.Quantity) ?? 0m,
+                    PhysicalStock = x.Lots.Sum(l => (decimal?)l.Quantity) ?? 0m
                 })
                 .ToListAsync();
 
@@ -78,6 +81,7 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
     {
         try
         {
+            var today = DateTime.Now.Date;
             var item = await db.Medicines.AsNoTracking()
                 .Where(x => x.MedicineId == id)
                 .Select(x => new MedicineItemResponse
@@ -90,9 +94,10 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
                     Unit = x.Unit,
                     BasePrice = x.BasePrice,
                     IsActive = x.IsActive,
-                    Stock = db.InventoryTransactions
-                                   .Where(t => t.MedicineId == x.MedicineId)
-                                   .Sum(t => (decimal?)t.Quantity) ?? 0m
+                    Stock = x.Lots
+                            .Where(l => l.ExpiryDate == null || l.ExpiryDate >= today)
+                            .Sum(l => (decimal?)l.Quantity) ?? 0m,
+                    PhysicalStock = x.Lots.Sum(l => (decimal?)l.Quantity) ?? 0m
                 })
                 .FirstOrDefaultAsync();
 
@@ -543,5 +548,5 @@ public sealed class MedicinesController(FoMedContext db) : ControllerBase
         });
     }
 
-    
+
 }
