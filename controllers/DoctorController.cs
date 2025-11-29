@@ -518,7 +518,7 @@ public class DoctorsController : ControllerBase
         var mime = file.ContentType.ToLowerInvariant();
         if (!AllowedMime.Contains(mime)) return BadRequest(new { success = false, message = "Loại file không hợp lệ." });
 
-        var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "doctors");
+        var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "doctors");
         if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
 
         // Xoá ảnh override cũ nếu có
@@ -573,7 +573,7 @@ public class DoctorsController : ControllerBase
 
         try
         {
-            var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "doctors");
+            var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "doctors");
             var name = Path.GetFileName(doctor.AvatarUrl);
             var filePath = Path.Combine(uploadDir, name);
             if (System.IO.File.Exists(filePath))

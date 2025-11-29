@@ -7,7 +7,7 @@ namespace FoMed.Api.Dtos.Billing
         public string CreatedAtText { get; set; } = "";       
         public string StatusLabel { get; set; } = "";       
 
-        public List<InvoiceLineDto> Lines { get; set; } = new();
+        public List<InvoiceLineDto> Items { get; set; } = new();
 
         public PatientInfoDto PatientInfo { get; set; } = new();
         public DoctorInfoDto DoctorInfo { get; set; } = new();

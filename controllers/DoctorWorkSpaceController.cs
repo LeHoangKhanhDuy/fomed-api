@@ -204,7 +204,12 @@ public sealed class DoctorWorkspaceController : ControllerBase
         var (doctorId, err) = await GetDoctorIdAsync();
         if (err != null) return ForbidApi(err);
 
-        var appt = await _db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
+        var appt = await _db.Appointments
+            .Include(a => a.Patient)
+            .Include(a => a.Doctor).ThenInclude(d => d.User)
+            .Include(a => a.Doctor).ThenInclude(d => d.PrimarySpecialty)
+            .Include(a => a.Service)
+            .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
@@ -281,7 +286,12 @@ public sealed class DoctorWorkspaceController : ControllerBase
         var (doctorId, err) = await GetDoctorIdAsync();
         if (err != null) return ForbidApi(err);
 
-        var appt = await _db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
+        var appt = await _db.Appointments
+            .Include(a => a.Patient)
+            .Include(a => a.Doctor).ThenInclude(d => d.User)
+            .Include(a => a.Doctor).ThenInclude(d => d.PrimarySpecialty)
+            .Include(a => a.Service)
+            .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
@@ -350,33 +360,51 @@ public sealed class DoctorWorkspaceController : ControllerBase
     [SwaggerOperation(Summary = "Hoàn tất khám và tạo hóa đơn")]
     public async Task<IActionResult> CompleteEncounter([FromBody] StartEncounterReq req)
     {
+        // 1. Validate dữ liệu đầu vào
         if (req.AppointmentId <= 0) return Bad("Thiếu hoặc sai AppointmentId.");
 
+        // 2. Lấy thông tin bác sĩ hiện tại
         var (doctorId, err) = await GetDoctorIdAsync();
         if (err != null) return ForbidApi(err);
 
-        var appt = await _db.Appointments.FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
+        // 3. Kiểm tra lịch hẹn và quyền sở hữu
+        var appt = await _db.Appointments
+            .Include(a => a.Patient)
+            .Include(a => a.Doctor).ThenInclude(d => d.User)
+            .Include(a => a.Doctor).ThenInclude(d => d.PrimarySpecialty)
+            .Include(a => a.Service)
+            .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
-        // Kiểm tra nếu đã có hóa đơn thì trả về luôn
+        // 4. Kiểm tra xem đã có hóa đơn chưa
         var existingInv = await _db.Invoices.FirstOrDefaultAsync(i => i.AppointmentId == appt.AppointmentId);
         if (existingInv != null)
         {
-            return ApiOk(new { appt.AppointmentId, status = "done", invoiceCode = existingInv.Code }, "Đã hoàn tất (Hóa đơn đã tồn tại).");
+            return ApiOk(new
+            {
+                appt.AppointmentId,
+                status = "finalized",
+                invoiceId = existingInv.InvoiceId,
+                invoiceCode = existingInv.Code
+            }, "Đã hoàn tất (Hóa đơn đã tồn tại).");
         }
 
+        // 5. Transaction an toàn
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await _db.Database.BeginTransactionAsync();
             try
             {
-                appt.Status = "done";
                 var now = DateTime.UtcNow;
 
+                // --- A. CẬP NHẬT TRẠNG THÁI LỊCH HẸN ---
+                appt.Status = "done";
+                appt.UpdatedAt = now;
+
+                // --- B. CẬP NHẬT ENCOUNTER ---
                 var enc = await _db.Encounters.FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
-                // Nếu chưa có encounter (ca khám không kê đơn/xét nghiệm), tạo mới
                 if (enc == null)
                 {
                     enc = new Encounter
@@ -385,39 +413,70 @@ public sealed class DoctorWorkspaceController : ControllerBase
                         PatientId = appt.PatientId,
                         DoctorId = appt.DoctorId,
                         ServiceId = appt.ServiceId,
-                        CreatedAt = now
+                        Status = "finalized",
+                        FinalizedAt = now,
+                        CreatedAt = now,
+                        UpdatedAt = now
                     };
                     _db.Encounters.Add(enc);
                     await _db.SaveChangesAsync();
                 }
+                else
+                {
+                    enc.Status = "finalized";
+                    enc.FinalizedAt = now;
+                    enc.UpdatedAt = now;
+                    if (enc.ServiceId == null && appt.ServiceId.HasValue) enc.ServiceId = appt.ServiceId;
+                    _db.Encounters.Update(enc);
+                    await _db.SaveChangesAsync();
+                }
 
-                // Tạo Invoice
-                var invoiceCode = $"INV{now:yyMMddHHmmss}";
+                // --- C. TẠO HÓA ĐƠN ---
+                var invoiceCode = $"INV{now:yyMMddHHmmss}{now.Millisecond:D3}";
+                var patient = appt.Patient;
+                var doctor = appt.Doctor;
+                var doctorUser = doctor?.User;
+                var patientName = patient?.FullName ?? "Unknown";
+                DateOnly? patientDob = null;
+                if (patient?.DateOfBirth != null)
+                {
+                    patientDob = DateOnly.FromDateTime(patient.DateOfBirth.Value);
+                }
+
                 var invoice = new Invoice
                 {
                     AppointmentId = appt.AppointmentId,
                     EncounterId = enc.EncounterId,
                     PatientId = appt.PatientId,
+                    PatientCode = patient?.PatientCode,
+                    PatientName = patientName,
+                    PatientDob = patientDob,
+                    PatientGender = patient?.Gender,
+                    PatientEmail = patient?.Email,
+                    PatientPhone = patient?.Phone,
+                    PatientNote = patient?.Note,
+                    DoctorId = appt.DoctorId,
+                    DoctorName = doctorUser?.FullName ?? doctor?.Title,
+                    DoctorSpecialty = doctor?.PrimarySpecialty?.Name,
+                    DoctorEmail = doctorUser?.Email,
+                    DoctorPhone = doctorUser?.Phone,
+                    ClinicName = doctor?.RoomName ?? appt.Service?.Name,
                     Code = invoiceCode,
                     CreatedAt = now,
+                    UpdatedAt = now,
                     Status = "unpaid",
-                    TotalAmount = 0
+                    TotalAmount = 0,
+                    Subtotal = 0
                 };
-
-                // Lấy tên bệnh nhân
-                var patientName = await _db.Patients
-                    .Where(p => p.PatientId == appt.PatientId)
-                    .Select(p => p.FullName)
-                    .FirstOrDefaultAsync();
-                invoice.PatientName = patientName ?? "Unknown";
 
                 _db.Invoices.Add(invoice);
                 await _db.SaveChangesAsync();
 
+                // --- D. TÍNH TOÁN CHI TIẾT ---
                 var itemsToAdd = new List<InvoiceItem>();
                 decimal subtotal = 0;
 
-                // Tiền công khám (Service)
+                // D1. Tiền công khám
                 if (appt.ServiceId > 0)
                 {
                     var service = await _db.Services.FindAsync(appt.ServiceId);
@@ -430,7 +489,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
                             ItemType = "service",
                             RefType = "Service",
                             RefId = appt.ServiceId,
-                            Description = $"Khám: {service.Name}",
+                            Description = $"{service.Name}",
                             Quantity = 1,
                             UnitPrice = price,
                             CreatedAt = now
@@ -439,89 +498,83 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     }
                 }
 
-                // Tiền xét nghiệm (Lab)
-                var labOrders = await _db.LabOrders
-                    .Include(lo => lo.Items)
-                    .Where(lo => lo.EncounterId == enc.EncounterId)
+                // D2. Tiền xét nghiệm
+                var labItems = await _db.LabOrderItems
+                    .Include(x => x.LabTest)
+                    .Where(x => x.LabOrder.EncounterId == enc.EncounterId && x.LabTestId != null)
                     .ToListAsync();
 
-                foreach (var lo in labOrders)
+                foreach (var item in labItems)
                 {
-                    foreach (var item in lo.Items)
+                    if (item.LabTest?.BasePrice > 0)
                     {
-                        var test = await _db.LabTests.FindAsync(item.LabTestId);
-                        if (test != null && test.BasePrice > 0)
+                        var price = item.LabTest.BasePrice.Value;
+                        itemsToAdd.Add(new InvoiceItem
                         {
-                            var price = test.BasePrice ?? 0;
-                            itemsToAdd.Add(new InvoiceItem
-                            {
-                                InvoiceId = invoice.InvoiceId,
-                                ItemType = "lab",
-                                RefType = "LabOrderItem",
-                                RefId = item.LabOrderItemId,
-                                Description = $"XN: {item.TestName}",
-                                Quantity = 1,
-                                UnitPrice = price,
-                                CreatedAt = now
-                            });
-                            subtotal += price;
-                        }
+                            InvoiceId = invoice.InvoiceId,
+                            ItemType = "lab",
+                            RefType = "LabOrderItem",
+                            RefId = item.LabOrderItemId,
+                            Description = $"XN: {item.LabTest.Name}",
+                            Quantity = 1,
+                            UnitPrice = price,
+                            CreatedAt = now
+                        });
+                        subtotal += price;
                     }
                 }
 
-                // Tiền thuốc (Prescription)
-                var prescriptions = await _db.EncounterPrescriptions
-                    .Include(p => p.Items)
-                    .Where(p => p.EncounterId == enc.EncounterId)
+                // D3. Tiền thuốc
+                var rxItems = await _db.PrescriptionItems
+                    .Include(x => x.Medicine)
+                    .Where(x => x.Prescription.EncounterId == enc.EncounterId && x.MedicineId != null)
                     .ToListAsync();
 
-                foreach (var p in prescriptions)
+                foreach (var item in rxItems)
                 {
-                    foreach (var item in p.Items)
+                    if (item.Medicine?.BasePrice > 0)
                     {
-                        if (item.MedicineId.HasValue)
+                        var price = item.Medicine.BasePrice;
+                        var qty = item.Quantity ?? 1;
+
+                        itemsToAdd.Add(new InvoiceItem
                         {
-                            var med = await _db.Medicines.FindAsync(item.MedicineId.Value);
-                            if (med != null && med.BasePrice > 0)
-                            {
-                                var qty = item.Quantity ?? 1;
-                                var price = med.BasePrice;
-                                itemsToAdd.Add(new InvoiceItem
-                                {
-                                    InvoiceId = invoice.InvoiceId,
-                                    ItemType = "medicine",
-                                    RefType = "PrescriptionItem",
-                                    RefId = item.ItemId,
-                                    Description = $"Thuốc: {med.Name}",
-                                    Quantity = qty,
-                                    UnitPrice = price,
-                                    CreatedAt = now
-                                });
-                                subtotal += (qty * price);
-                            }
-                        }
+                            InvoiceId = invoice.InvoiceId,
+                            ItemType = "medicine",
+                            RefType = "PrescriptionItem",
+                            RefId = item.ItemId,
+                            Description = $"Thuốc: {item.Medicine.Name}",
+                            Quantity = qty,
+                            UnitPrice = price,
+                            CreatedAt = now
+                        });
+                        subtotal += (qty * price);
                     }
                 }
 
-                if (itemsToAdd.Any())
-                {
-                    _db.InvoiceItems.AddRange(itemsToAdd);
-                }
+                if (itemsToAdd.Any()) _db.InvoiceItems.AddRange(itemsToAdd);
 
                 invoice.Subtotal = subtotal;
-                invoice.TotalAmount = subtotal; // + Tax - Discount nếu có
+                invoice.TotalAmount = subtotal;
                 _db.Invoices.Update(invoice);
 
                 await _db.SaveChangesAsync();
                 await tx.CommitAsync();
 
-                return ApiOk(new { appt.AppointmentId, status = "done", invoiceId = invoice.InvoiceId, invoiceCode = invoice.Code },
-                             "Đã hoàn tất khám và tạo hóa đơn.");
+                return ApiOk(new
+                {
+                    appt.AppointmentId,
+                    status = "finalized",
+                    invoiceId = invoice.InvoiceId,
+                    invoiceCode = invoice.Code
+                }, "Đã hoàn tất khám và tạo hóa đơn.");
             }
             catch (Exception ex)
             {
                 await tx.RollbackAsync();
-                return ApiError(500, "Lỗi hoàn tất khám: " + ex.Message);
+                var innerMsg = ex.InnerException?.Message ?? "No Inner Exception";
+                Console.WriteLine($"[Error] {ex.Message} | Inner: {innerMsg}");
+                return ApiError(500, $"Lỗi hoàn tất khám: {ex.Message} (Inner: {innerMsg})");
             }
         });
     }

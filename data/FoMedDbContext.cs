@@ -272,7 +272,7 @@ public class FoMedContext : DbContext
             e.Property(x => x.IsActive).HasDefaultValue(true);
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
             e.Property(x => x.PatientCode)
-            .HasComputedColumnSql("'BN' + RIGHT('0000' + CAST([PatientId] AS VARCHAR(4)), 4)", stored: false);
+            .HasComputedColumnSql("'BN' + RIGHT('0000' + CAST([PatientId] AS VARCHAR(4)), 4)", stored: true);
             e.HasIndex(p => p.PatientCode).IsUnique().HasFilter("[PatientCode] IS NOT NULL");
             e.Property(x => x.AllergyText).HasMaxLength(300);
         });

@@ -1001,7 +1001,7 @@ namespace FoMed_WebAPI.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")
-                        .HasComputedColumnSql("'BN' + RIGHT('0000' + CAST([PatientId] AS VARCHAR(4)), 4)", false);
+                        .HasComputedColumnSql("'BN' + RIGHT('0000' + CAST([PatientId] AS VARCHAR(4)), 4)", true);
 
                     b.Property<string>("Phone")
                         .IsRequired()

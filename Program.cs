@@ -207,17 +207,17 @@ if (!Directory.Exists(avatarsPath))
 // Serve files từ wwwroot
 app.UseStaticFiles();
 
-// // Serve files từ folder uploads
-// app.UseStaticFiles(new StaticFileOptions
-// {
-//     FileProvider = new PhysicalFileProvider(
-//         Path.Combine(Directory.GetCurrentDirectory(), "uploads")),
-//     RequestPath = "/uploads",
-//     OnPrepareResponse = ctx =>
-//     {
-//         ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=604800");
-//     }
-// });
+// Serve files từ folder uploads (nằm ngoài wwwroot để tránh bị xoá khi deploy)
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(
+        Path.Combine(Directory.GetCurrentDirectory(), "uploads")),
+    RequestPath = "/uploads",
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=604800");
+    }
+});
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>

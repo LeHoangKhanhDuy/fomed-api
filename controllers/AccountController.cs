@@ -853,7 +853,7 @@ public class AccountsController : ControllerBase
             return BadRequest(new { message = "Định dạng tệp không hợp lệ." });
 
         // ========= Save =========
-        var root = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "avatars");
+        var root = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "avatars");
         Directory.CreateDirectory(root);
         var fileName = $"{userId}_{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
         var absPath = Path.Combine(root, fileName);
@@ -890,7 +890,13 @@ public class AccountsController : ControllerBase
             if (string.IsNullOrWhiteSpace(oldUrl)) return;
             var rel = oldUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? new Uri(oldUrl).AbsolutePath : oldUrl;
             if (!rel.StartsWith("/uploads/avatars/", StringComparison.OrdinalIgnoreCase)) return;
-            var abs = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", rel.TrimStart('/'));
+
+            var uploadsRoot = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+            var relativePart = rel.Substring("/uploads/".Length)
+                .Replace('/', Path.DirectorySeparatorChar)
+                .TrimStart(Path.DirectorySeparatorChar);
+
+            var abs = Path.Combine(uploadsRoot, relativePart);
             if (System.IO.File.Exists(abs)) System.IO.File.Delete(abs);
         }
         catch { }
