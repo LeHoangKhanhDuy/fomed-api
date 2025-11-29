@@ -225,7 +225,7 @@ public class FoMedContext : DbContext
 
             e.Property(p => p.DateOfBirth).HasColumnType("date");      // DateOnly -> date
             e.Property(p => p.Gender).HasColumnType("char(1)");
-            e.Property(p => p.AvatarUrl).HasMaxLength(500);
+            e.Property(p => p.AvatarUrl).HasMaxLength(2048);
             e.Property(p => p.Address).HasMaxLength(300);
             e.Property(p => p.Bio).HasMaxLength(1000);
 

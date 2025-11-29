@@ -690,120 +690,82 @@ public class AccountsController : ControllerBase
             .Include(u => u.Profile)
             .FirstOrDefaultAsync(u => u.UserId == userId && u.IsActive);
 
-        if (user == null)
+        if (user == null) return NotFound(new { success = false, message = "Không tìm thấy người dùng." });
+
+        // Validate Phone trùng
+        if (!string.IsNullOrWhiteSpace(req.Phone) && user.Phone != req.Phone.Trim())
         {
-            _logger.LogWarning("User not found. UserId: {UserId}", userId);
-            return NotFound(new { success = false, message = "Không tìm thấy người dùng." });
+            var existed = await _db.Users.AnyAsync(x => x.Phone == req.Phone.Trim() && x.UserId != userId);
+            if (existed) return BadRequest(new { success = false, message = "Số điện thoại đã được sử dụng." });
         }
 
-        // 4) Validate phone nếu có thay đổi
-        if (!string.IsNullOrWhiteSpace(req.Phone))
+        // 1. Tạo Strategy
+        var strategy = _db.Database.CreateExecutionStrategy();
+
+        // 2. Thực thi logic bên trong Strategy
+        return await strategy.ExecuteAsync(async () =>
         {
-            var phoneToCheck = req.Phone.Trim();
-
-            if (user.Phone != phoneToCheck)
+            using var tx = await _db.Database.BeginTransactionAsync();
+            try
             {
-                var existed = await _db.Users
-                    .AnyAsync(x => x.Phone == phoneToCheck && x.UserId != userId);
+                // Update User
+                user.FullName = req.Name.Trim();
+                if (!string.IsNullOrWhiteSpace(req.Phone)) user.Phone = req.Phone.Trim();
 
-                if (existed)
+                // Update Profile
+                if (user.Profile == null)
                 {
-                    _logger.LogWarning("Phone already exists. Phone: {Phone}, UserId: {UserId}", phoneToCheck, userId);
-                    ModelState.AddModelError(nameof(req.Phone), "Số điện thoại đã được sử dụng.");
-                    return ValidationProblem(ModelState);
+                    user.Profile = new UserProfile
+                    {
+                        UserId = user.UserId,
+                        AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim(),
+                        Address = string.IsNullOrWhiteSpace(req.Address) ? null : req.Address.Trim(),
+                        Bio = string.IsNullOrWhiteSpace(req.Bio) ? null : req.Bio.Trim(),
+                        UpdatedAt = DateTime.UtcNow
+                    };
                 }
-            }
-        }
-
-        using var tx = await _db.Database.BeginTransactionAsync();
-        try
-        {
-            // Cập nhật User
-            user.FullName = req.Name.Trim();
-
-            if (!string.IsNullOrWhiteSpace(req.Phone))
-            {
-                user.Phone = req.Phone.Trim();
-            }
-
-            // Cập nhật hoặc tạo mới UserProfile
-            if (user.Profile == null)
-            {
-                _logger.LogInformation("Creating new UserProfile for UserId: {UserId}", userId);
-
-                // CHỈ GÁN QUA NAVIGATION PROPERTY - KHÔNG CẦN _db.UserProfiles.Add()
-                user.Profile = new UserProfile
+                else
                 {
-                    UserId = user.UserId,
-                    AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim(),
-                    Address = string.IsNullOrWhiteSpace(req.Address) ? null : req.Address.Trim(),
-                    Bio = string.IsNullOrWhiteSpace(req.Bio) ? null : req.Bio.Trim(),
-                    UpdatedAt = DateTime.UtcNow
-                };
-                // ✅ XÓA: _db.UserProfiles.Add(user.Profile);
-            }
-            else
-            {
-                // Profile đã tồn tại - cập nhật các field
-                if (!string.IsNullOrWhiteSpace(req.AvatarUrl))
-                {
-                    user.Profile.AvatarUrl = req.AvatarUrl.Trim();
+                    if (req.AvatarUrl != null) user.Profile.AvatarUrl = req.AvatarUrl.Trim();
+                    if (req.Address != null) user.Profile.Address = req.Address.Trim();
+                    if (req.Bio != null) user.Profile.Bio = req.Bio.Trim();
+                    user.Profile.UpdatedAt = DateTime.UtcNow;
                 }
+                user.UpdatedAt = DateTime.UtcNow;
 
-                if (!string.IsNullOrWhiteSpace(req.Address))
+                await _db.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                _logger.LogInformation("Profile updated successfully for UserId: {UserId}", userId);
+
+                return Ok(new
                 {
-                    user.Profile.Address = req.Address.Trim();
-                }
-
-                if (!string.IsNullOrWhiteSpace(req.Bio))
-                {
-                    user.Profile.Bio = req.Bio.Trim();
-                }
-
-                user.Profile.UpdatedAt = DateTime.UtcNow;
+                    success = true,
+                    message = "Cập nhật hồ sơ thành công",
+                    data = new
+                    {
+                        id = user.UserId,
+                        name = user.FullName,
+                        email = user.Email,
+                        phone = user.Phone,
+                        avatarUrl = user.Profile?.AvatarUrl,
+                        address = user.Profile?.Address,
+                        bio = user.Profile?.Bio,
+                        updatedAt = user.Profile?.UpdatedAt
+                    }
+                });
             }
-
-            user.UpdatedAt = DateTime.UtcNow;
-
-            await _db.SaveChangesAsync();
-            await tx.CommitAsync();
-
-            _logger.LogInformation("Profile updated successfully for UserId: {UserId}", userId);
-        }
-        catch (Exception ex)
-        {
-            await tx.RollbackAsync();
-
-            _logger.LogError(ex, "Error updating profile for UserId: {UserId}. Error: {ErrorMessage}",
-                userId, ex.Message);
-
-            if (ex.InnerException != null)
+            catch (Exception ex)
             {
-                _logger.LogError("Inner exception: {InnerException}", ex.InnerException.Message);
-            }
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "Lỗi update profile: {Message}", ex.Message);
 
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new
+                // Trả lỗi 500 kèm message để Frontend hiển thị
+                return StatusCode(StatusCodes.Status500InternalServerError, new
                 {
                     success = false,
-                    message = "Có lỗi máy chủ khi cập nhật hồ sơ."
+                    message = "Lỗi server: " + ex.Message
                 });
-        }
-
-        return Ok(new
-        {
-            success = true,
-            message = "Cập nhật hồ sơ thành công",
-            data = new
-            {
-                id = user.UserId,
-                name = user.FullName,
-                email = user.Email,
-                phone = user.Phone,
-                avatarUrl = user.Profile?.AvatarUrl,
-                address = user.Profile?.Address,
-                bio = user.Profile?.Bio,
-                updatedAt = user.Profile?.UpdatedAt
             }
         });
     }
