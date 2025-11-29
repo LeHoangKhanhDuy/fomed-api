@@ -305,6 +305,24 @@ namespace FoMed.Api.Controllers
                 inv.Status = "unpaid";
             }
 
+            // Đồng bộ doanh thu cho Dashboard: chuyển lịch hẹn về done + gán FinalCost
+            if (inv.AppointmentId.HasValue && inv.Status == "paid")
+            {
+                var appointment = await _db.Appointments
+                    .FirstOrDefaultAsync(a => a.AppointmentId == inv.AppointmentId.Value, ct);
+
+                if (appointment != null)
+                {
+                    appointment.FinalCost = inv.TotalAmount;
+                    if (!string.Equals(appointment.Status, "done", StringComparison.OrdinalIgnoreCase))
+                    {
+                        appointment.Status = "done";
+                    }
+
+                    appointment.UpdatedAt = now;
+                }
+            }
+
             await _db.SaveChangesAsync(ct);
 
             return Ok(new

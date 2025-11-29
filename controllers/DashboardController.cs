@@ -33,10 +33,10 @@ public class DashboardController : ControllerBase
         if (toDate < fromDate)
             return BadRequest(new { success = false, message = "`to` phải >= `from`" });
 
-        // ===== Base query: lượt khám đã hoàn tất theo ngày =====
+        // ===== Base query: lượt khám đã hoàn tất theo ngày (chỉ tính những lịch có FinalCost) =====
         var q = _db.Appointments
             .AsNoTracking()
-            .Where(a => a.Status == "done");
+            .Where(a => a.Status == "done" && a.FinalCost.HasValue);
 
         if (doctorId is > 0) q = q.Where(a => a.DoctorId == doctorId);
         if (serviceId is > 0) q = q.Where(a => a.ServiceId == serviceId);
@@ -270,10 +270,10 @@ public class DashboardController : ControllerBase
     [Produces("application/json")]
     public async Task<ActionResult> GetMonthlyTarget(
         [FromQuery] int? year,
-        [FromQuery] int? month,          
+        [FromQuery] int? month,
         [FromQuery] int? doctorId,
         [FromQuery] int? serviceId,
-        [FromQuery] decimal? target,    
+        [FromQuery] decimal? target,
         CancellationToken ct = default)
     {
         var now = DateTime.Now;
