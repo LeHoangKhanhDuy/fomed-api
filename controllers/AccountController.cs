@@ -406,7 +406,7 @@ public class AccountsController : ControllerBase
             {
                 await using var tx = await _db.Database.BeginTransactionAsync();
 
-                // Seed role PATIENT nếu chưa có (lấy trong tx)
+                // 1. Kiểm tra Role
                 var role = await _db.Roles.FirstOrDefaultAsync(r => r.Code == "PATIENT");
                 if (role is null)
                 {
@@ -415,9 +415,11 @@ public class AccountsController : ControllerBase
                     await _db.SaveChangesAsync();
                 }
 
+                // 2. Lưu User
                 _db.Users.Add(user);
                 await _db.SaveChangesAsync();
 
+                // 3. Lưu UserRole
                 _db.UserRoles.Add(new UserRole
                 {
                     UserId = user.UserId,
@@ -428,44 +430,56 @@ public class AccountsController : ControllerBase
 
                 await tx.CommitAsync();
             });
+
+            // --- Tạo JWT + refresh token ---
+            var roles = new[] { "PATIENT" };
+            var (accessToken, expiresAt) = GenerateJwt(user, roles);
+
+            var refreshDaysString = _cfg["Jwt:RefreshDays"];
+            if (string.IsNullOrEmpty(refreshDaysString))
+            {
+                throw new Exception("Cấu hình 'Jwt:RefreshDays' bị thiếu trong appsettings.json");
+            }
+
+            var refreshDays = int.Parse(refreshDaysString);
+            var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+
+            _db.UserSessions.Add(new UserSession
+            {
+                UserId = user.UserId,
+                RefreshToken = refresh,
+                IssuedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(refreshDays),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                UserAgent = Request.Headers.UserAgent.ToString()
+            });
+
+            await _db.SaveChangesAsync();
+
+            var data = new LoginTokenResponse
+            {
+                Token = accessToken,
+                ExpiresAt = expiresAt,
+                RefreshToken = refresh,
+                FullName = user.FullName,
+                Email = user.Email,
+                Phone = user.Phone,
+                Roles = roles
+            };
+
+            return Ok(ApiResponse<LoginTokenResponse>.Success(data, "Đăng ký thành công"));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Lỗi đăng ký: {Message}", ex.Message);
+
+            var errorMsg = ex.InnerException != null
+                ? $"{ex.Message} | Inner: {ex.InnerException.Message}"
+                : ex.Message;
+
             return StatusCode(StatusCodes.Status500InternalServerError,
-                ApiResponse<LoginTokenResponse>.Fail("Đăng ký thất bại, vui lòng thử lại.", 500));
+                ApiResponse<object>.Fail($"Lỗi Server (Debug): {errorMsg}", 500));
         }
-
-
-        // --- Tạo JWT + refresh token như login ---
-        var roles = new[] { "PATIENT" };
-        var (accessToken, expiresAt) = GenerateJwt(user, roles);
-
-        var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        var refreshDays = int.Parse(_cfg["Jwt:RefreshDays"]!);
-
-        _db.UserSessions.Add(new UserSession
-        {
-            UserId = user.UserId,
-            RefreshToken = refresh,
-            IssuedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(refreshDays),
-            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = Request.Headers.UserAgent.ToString()
-        });
-        await _db.SaveChangesAsync();
-
-        var data = new LoginTokenResponse
-        {
-            Token = accessToken,
-            ExpiresAt = expiresAt,
-            RefreshToken = refresh,
-            FullName = user.FullName,
-            Email = user.Email,
-            Phone = user.Phone,
-            Roles = roles
-        };
-
-        return Ok(ApiResponse<LoginTokenResponse>.Success(data, "Đăng ký thành công"));
     }
 
 
