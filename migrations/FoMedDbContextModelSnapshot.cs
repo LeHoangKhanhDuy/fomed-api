@@ -1699,8 +1699,8 @@ namespace FoMed_WebAPI.Migrations
                         .HasColumnType("nvarchar(300)");
 
                     b.Property<string>("AvatarUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
 
                     b.Property<string>("Bio")
                         .HasMaxLength(1000)

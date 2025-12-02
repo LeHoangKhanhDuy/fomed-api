@@ -24,15 +24,31 @@ public class DoctorsController : ControllerBase
     public async Task<ActionResult> GetDoctors(
         [FromQuery] int page = 1,
         [FromQuery] int limit = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] int? specialtyId = null,
         CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         limit = Math.Clamp(limit, 1, 100);
 
         var baseQuery = _db.Doctors.AsNoTracking()
+            .Include(d => d.User)
             .Where(d => d.IsActive
                         && d.User != null
                         && _db.UserRoles.Any(ur => ur.UserId == d.UserId && ur.Role.Code == DOCTOR_ROLE_CODE));
+
+        // Tìm kiếm theo chuyên khoa
+        if (specialtyId.HasValue)
+        {
+            baseQuery = baseQuery.Where(d => d.PrimarySpecialtyId == specialtyId.Value);
+        }
+
+        // Tìm kiếm theo tên
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var q = search.Trim().ToLower();
+            baseQuery = baseQuery.Where(d => d.User!.FullName.ToLower().Contains(q));
+        }
 
         var total = await baseQuery.CountAsync(ct);
 
@@ -1042,6 +1058,64 @@ public class DoctorsController : ControllerBase
             success = true,
             message = "Đã vô hiệu hoá ca trực."
         });
+    }
+
+    [HttpPost("admin/sync-visit-counts")]
+    [Authorize(Roles = "ADMIN")]
+    [Produces("application/json")]
+    [SwaggerOperation(
+        Summary = "Tính toán lại tổng lượt khám cho tất cả bác sĩ",
+        Description = "Quét bảng Appointments (status=done) và update lại VisitCount trong bảng Doctors.",
+        Tags = new[] { "Doctors" }
+    )]
+    public async Task<IActionResult> SyncVisitCounts(CancellationToken ct = default)
+    {
+        try
+        {
+            // 1. Tính toán số lượt khám thực tế từ bảng Appointments (status = 'done')
+            var realCounts = await _db.Appointments
+                .AsNoTracking()
+                .Where(a => a.Status == "done")
+                .GroupBy(a => a.DoctorId)
+                .Select(g => new
+                {
+                    DoctorId = g.Key,
+                    Count = g.Count()
+                })
+                .ToListAsync(ct);
+
+            // 2. Lấy tất cả bác sĩ
+            var doctors = await _db.Doctors.ToListAsync(ct);
+
+            // 3. Cập nhật
+            int updatedCount = 0;
+            foreach (var doc in doctors)
+            {
+                var realData = realCounts.FirstOrDefault(x => x.DoctorId == doc.DoctorId);
+                var newCount = realData?.Count ?? 0;
+
+                if (doc.VisitCount != newCount)
+                {
+                    doc.VisitCount = newCount;
+                    updatedCount++;
+                }
+            }
+
+            if (updatedCount > 0)
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                message = $"Đã đồng bộ xong. Cập nhật số liệu cho {updatedCount} bác sĩ."
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { success = false, message = "Lỗi khi đồng bộ.", error = ex.Message });
+        }
     }
 
 }

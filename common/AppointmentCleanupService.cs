@@ -10,7 +10,6 @@ public class AppointmentCleanupService : BackgroundService
     private readonly ILogger<AppointmentCleanupService> _logger;
 
     // Sử dụng IServiceProvider để có thể tạo DbContext trong một scope riêng
-    // (vì BackgroundService là Singleton, còn DbContext là Scoped)
     public AppointmentCleanupService(IServiceProvider serviceProvider, ILogger<AppointmentCleanupService> logger)
     {
         _serviceProvider = serviceProvider;
@@ -77,14 +76,13 @@ public class AppointmentCleanupService : BackgroundService
 
         if (appointmentsToCancel.Any())
         {
-            // Log này rất quan trọng, hãy kiểm tra nó
             _logger.LogInformation("Found {Count} appointments to cancel.", appointmentsToCancel.Count);
             var utcNow = DateTime.UtcNow;
 
             foreach (var appt in appointmentsToCancel)
             {
                 // Cập nhật trạng thái
-                appt.Status = "cancelled"; // Hoặc "missed"
+                appt.Status = "cancelled"; 
                 appt.UpdatedAt = utcNow;
             }
 
@@ -93,7 +91,6 @@ public class AppointmentCleanupService : BackgroundService
         }
         else
         {
-            // Bạn sẽ thấy log này nếu logic múi giờ bị sai
             _logger.LogInformation("No appointments to clean up.");
         }
     }

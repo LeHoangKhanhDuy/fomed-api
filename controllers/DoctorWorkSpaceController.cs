@@ -360,20 +360,21 @@ public sealed class DoctorWorkspaceController : ControllerBase
     [SwaggerOperation(Summary = "Hoàn tất khám và tạo hóa đơn")]
     public async Task<IActionResult> CompleteEncounter([FromBody] StartEncounterReq req)
     {
-        // 1. Validate dữ liệu đầu vào
+        // 1. Validate 
         if (req.AppointmentId <= 0) return Bad("Thiếu hoặc sai AppointmentId.");
 
         // 2. Lấy thông tin bác sĩ hiện tại
         var (doctorId, err) = await GetDoctorIdAsync();
         if (err != null) return ForbidApi(err);
 
-        // 3. Kiểm tra lịch hẹn và quyền sở hữu
+        // 3. Kiểm tra lịch hẹn và quyền 
         var appt = await _db.Appointments
             .Include(a => a.Patient)
             .Include(a => a.Doctor).ThenInclude(d => d.User)
             .Include(a => a.Doctor).ThenInclude(d => d.PrimarySpecialty)
             .Include(a => a.Service)
             .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
+
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
 
@@ -397,13 +398,12 @@ public sealed class DoctorWorkspaceController : ControllerBase
             await using var tx = await _db.Database.BeginTransactionAsync();
             try
             {
-                var now = DateTime.UtcNow;
-
-                // --- A. CẬP NHẬT TRẠNG THÁI LỊCH HẸN ---
+                // 5.1. Cập nhật trạng thái lịch hẹn
                 appt.Status = "done";
+                var now = DateTime.UtcNow;
                 appt.UpdatedAt = now;
 
-                // --- B. CẬP NHẬT ENCOUNTER ---
+                // 5.2. CẬP NHẬT ENCOUNTER
                 var enc = await _db.Encounters.FirstOrDefaultAsync(e => e.AppointmentId == appt.AppointmentId);
                 if (enc == null)
                 {
@@ -431,7 +431,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     await _db.SaveChangesAsync();
                 }
 
-                // --- C. TẠO HÓA ĐƠN ---
+                // 5.3. TẠO HÓA ĐƠN 
                 var invoiceCode = $"INV{now:yyMMddHHmmss}{now.Millisecond:D3}";
                 var patient = appt.Patient;
                 var doctor = appt.Doctor;
@@ -472,11 +472,11 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 _db.Invoices.Add(invoice);
                 await _db.SaveChangesAsync();
 
-                // --- D. TÍNH TOÁN CHI TIẾT ---
+                // 5.4. TÍNH TOÁN CHI TIẾT
                 var itemsToAdd = new List<InvoiceItem>();
                 decimal subtotal = 0;
 
-                // D1. Tiền công khám
+                // 5.5. Tiền công khám
                 if (appt.ServiceId > 0)
                 {
                     var service = await _db.Services.FindAsync(appt.ServiceId);
@@ -498,7 +498,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     }
                 }
 
-                // D2. Tiền xét nghiệm
+                // 5.6. Tiền xét nghiệm
                 var labItems = await _db.LabOrderItems
                     .Include(x => x.LabTest)
                     .Where(x => x.LabOrder.EncounterId == enc.EncounterId && x.LabTestId != null)
@@ -524,7 +524,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     }
                 }
 
-                // D3. Tiền thuốc
+                // 5.7. Tiền thuốc
                 var rxItems = await _db.PrescriptionItems
                     .Include(x => x.Medicine)
                     .Where(x => x.Prescription.EncounterId == enc.EncounterId && x.MedicineId != null)
@@ -557,6 +557,19 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 invoice.Subtotal = subtotal;
                 invoice.TotalAmount = subtotal;
                 _db.Invoices.Update(invoice);
+                appt.FinalCost = subtotal;
+
+                // 5.8. CẬP NHẬT SỐ LƯỢT KHÁM CHO BÁC SĨ
+                if (appt.Doctor != null)
+                {
+                    appt.Doctor.VisitCount += 1;
+                }
+                else
+                {
+                    // Fallback 
+                    var docEntity = await _db.Doctors.FindAsync(appt.DoctorId);
+                    if (docEntity != null) docEntity.VisitCount += 1;
+                }
 
                 await _db.SaveChangesAsync();
                 await tx.CommitAsync();
@@ -566,8 +579,9 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     appt.AppointmentId,
                     status = "finalized",
                     invoiceId = invoice.InvoiceId,
-                    invoiceCode = invoice.Code
-                }, "Đã hoàn tất khám và tạo hóa đơn.");
+                    invoiceCode = invoice.Code,
+                    newVisitCount = appt.Doctor?.VisitCount 
+                }, "Đã hoàn tất khám, tạo hóa đơn và cập nhật lượt khám.");
             }
             catch (Exception ex)
             {

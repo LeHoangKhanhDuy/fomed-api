@@ -14,6 +14,8 @@ public class DashboardController : ControllerBase
 
     public DashboardController(FoMedContext db) => _db = db;
 
+    public sealed record DoctorVisitCountDto(int DoctorId, string DoctorName, int VisitCount);
+
     //Thống kê tổng số lượt khám (Appointments.Status = done, có VisitAt)
     [HttpGet("visits")]
     [Produces("application/json")]
