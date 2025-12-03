@@ -527,8 +527,16 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 // 5.7. Tiền thuốc
                 var rxItems = await _db.PrescriptionItems
                     .Include(x => x.Medicine)
+                    .Include(x => x.Prescription)
                     .Where(x => x.Prescription.EncounterId == enc.EncounterId && x.MedicineId != null)
                     .ToListAsync();
+
+                var dispenseResult = await PreparePrescriptionDispenseAsync(rxItems, now);
+                if (!dispenseResult.Success)
+                {
+                    await tx.RollbackAsync();
+                    return Bad(dispenseResult.Error ?? "Tồn kho không đủ.");
+                }
 
                 foreach (var item in rxItems)
                 {
@@ -553,6 +561,8 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 }
 
                 if (itemsToAdd.Any()) _db.InvoiceItems.AddRange(itemsToAdd);
+                if (dispenseResult.Lines.Any()) _db.DispenseLines.AddRange(dispenseResult.Lines);
+                if (dispenseResult.Transactions.Any()) _db.InventoryTransactions.AddRange(dispenseResult.Transactions);
 
                 invoice.Subtotal = subtotal;
                 invoice.TotalAmount = subtotal;
@@ -580,7 +590,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
                     status = "finalized",
                     invoiceId = invoice.InvoiceId,
                     invoiceCode = invoice.Code,
-                    newVisitCount = appt.Doctor?.VisitCount 
+                    newVisitCount = appt.Doctor?.VisitCount
                 }, "Đã hoàn tất khám, tạo hóa đơn và cập nhật lượt khám.");
             }
             catch (Exception ex)
@@ -591,5 +601,93 @@ public sealed class DoctorWorkspaceController : ControllerBase
                 return ApiError(500, $"Lỗi hoàn tất khám: {ex.Message} (Inner: {innerMsg})");
             }
         });
+    }
+
+    private async Task<(bool Success, string? Error, List<DispenseLine> Lines, List<InventoryTransaction> Transactions)> PreparePrescriptionDispenseAsync(
+        List<PrescriptionItem> items,
+        DateTime now)
+    {
+        var lines = new List<DispenseLine>();
+        var transactions = new List<InventoryTransaction>();
+
+        var toProcess = items
+            .Where(x => x.MedicineId.HasValue && (x.Quantity ?? 1m) > 0 && x.Medicine != null)
+            .ToList();
+
+        if (toProcess.Count == 0)
+            return (true, null, lines, transactions);
+
+        var medIds = toProcess
+            .Select(x => x.MedicineId!.Value)
+            .Distinct()
+            .ToList();
+
+        var lots = await _db.MedicineLots
+            .Where(l => medIds.Contains(l.MedicineId) && (l.ExpiryDate == null || l.ExpiryDate > now))
+            .OrderBy(l => l.ExpiryDate ?? DateTime.MaxValue)
+            .ThenBy(l => l.LotId)
+            .ToListAsync();
+
+        var lotsByMed = lots
+            .GroupBy(l => l.MedicineId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var item in toProcess)
+        {
+            var medId = item.MedicineId!.Value;
+            var requiredQty = item.Quantity ?? 1m;
+            if (requiredQty <= 0) continue;
+
+            if (!lotsByMed.TryGetValue(medId, out var medLots) || medLots.Sum(l => l.Quantity) < requiredQty)
+            {
+                var medName = item.Medicine?.Name ?? $"ID {medId}";
+                var available = medLots?.Sum(l => l.Quantity) ?? 0m;
+                return (false, $"Tồn kho không đủ cho '{medName}' (cần {requiredQty}, còn {available}).", new List<DispenseLine>(), new List<InventoryTransaction>());
+            }
+
+            var remaining = requiredQty;
+            var rxCode = item.Prescription?.Code ?? $"RX-{item.PrescriptionId}";
+
+            foreach (var lot in medLots)
+            {
+                if (remaining <= 0) break;
+                if (lot.Quantity <= 0) continue;
+
+                var take = Math.Min(remaining, lot.Quantity);
+                lot.Quantity -= take;
+                remaining -= take;
+
+                var unitCost = lot.PurchasePrice ?? item.UnitPrice ?? item.Medicine?.BasePrice ?? 0m;
+
+                lines.Add(new DispenseLine
+                {
+                    PrescriptionItemId = item.ItemId,
+                    LotId = lot.LotId,
+                    Quantity = take,
+                    UnitCost = unitCost,
+                    CreatedAt = now
+                });
+
+                transactions.Add(new InventoryTransaction
+                {
+                    MedicineId = medId,
+                    LotId = lot.LotId,
+                    TxnType = "out",
+                    Quantity = -take,
+                    UnitCost = unitCost,
+                    RefNote = $"RX {rxCode}",
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+
+            if (remaining > 0)
+            {
+                var medName = item.Medicine?.Name ?? $"ID {medId}";
+                return (false, $"Không thể xuất đủ '{medName}' từ kho.", new List<DispenseLine>(), new List<InventoryTransaction>());
+            }
+        }
+
+        return (true, null, lines, transactions);
     }
 }
