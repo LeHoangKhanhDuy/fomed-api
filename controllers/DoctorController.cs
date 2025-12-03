@@ -12,9 +12,6 @@ public class DoctorsController : ControllerBase
     private readonly FoMedContext _db;
     public DoctorsController(FoMedContext db) => _db = db;
     private const string DOCTOR_ROLE_CODE = "DOCTOR";
-    private static readonly string[] AllowedExt = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-    private static readonly string[] AllowedMime = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    private const long MaxFileSize = 5L * 1024 * 1024; // 5MB
 
     /* ================== DANH SÁCH BÁC SĨ CÔNG KHAI ================== */
     [HttpGet]
@@ -384,7 +381,7 @@ public class DoctorsController : ControllerBase
             ExperienceYears = req.ExperienceYears,
             ExperienceNote = string.IsNullOrWhiteSpace(req.ExperienceNote) ? null : req.ExperienceNote.Trim(),
             Intro = string.IsNullOrWhiteSpace(req.Intro) ? null : req.Intro.Trim(),
-            AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim(), // có thể set sẵn
+            AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl) ? null : req.AvatarUrl.Trim(),
             IsActive = true,
             RatingAvg = 0,
             RatingCount = 0,
@@ -447,131 +444,35 @@ public class DoctorsController : ControllerBase
         if (req.Intro != null) doctor.Intro = req.Intro.Trim();
         if (req.IsActive.HasValue) doctor.IsActive = req.IsActive.Value;
 
-        // ---- AvatarUrl (URL-only): chỉ set khi có giá trị KHÔNG RỖNG
-        if (req.AvatarUrl is not null)
+        if (req.AvatarUrl != null) // null = không đổi, "" = xóa, "url" = cập nhật
         {
-            var url = req.AvatarUrl.Trim();
-            if (!string.IsNullOrEmpty(url))
-            {
-                // tối thiểu kiểm tra http/https
-                if (!Uri.TryCreate(url, UriKind.Absolute, out var _) || !(url.StartsWith("http://") || url.StartsWith("https://")))
-                    return BadRequest(new { success = false, message = "AvatarUrl phải là URL http/https hợp lệ." });
-
-                doctor.AvatarUrl = url;
-            }
-            // else: KHÔNG set null để tránh xóa nhầm
+            doctor.AvatarUrl = string.IsNullOrWhiteSpace(req.AvatarUrl)
+                ? null
+                : req.AvatarUrl.Trim();
         }
 
         // ---- Collections: chỉ replace khi request có field
         if (req.Educations is not null)
         {
             _db.DoctorEducations.RemoveRange(_db.DoctorEducations.Where(e => e.DoctorId == id));
-            if (req.Educations.Count > 0)
-            {
-                _db.DoctorEducations.AddRange(req.Educations.Select((e, idx) => new DoctorEducation
-                {
-                    DoctorId = id,
-                    YearFrom = e.YearFrom.HasValue ? (short?)e.YearFrom.Value : null,
-                    YearTo = e.YearTo.HasValue ? (short?)e.YearTo.Value : null,
-                    Title = e.Title,
-                    Detail = e.Detail,
-                    SortOrder = e.SortOrder > 0 ? e.SortOrder : idx
-                }));
-            }
+            if (req.Educations.Count > 0) _db.DoctorEducations.AddRange(req.Educations.Select((e, idx) => new DoctorEducation { DoctorId = id, YearFrom = (short?)e.YearFrom, YearTo = (short?)e.YearTo, Title = e.Title, Detail = e.Detail, SortOrder = e.SortOrder > 0 ? e.SortOrder : idx }));
         }
 
         if (req.Expertises is not null)
         {
             _db.DoctorExpertises.RemoveRange(_db.DoctorExpertises.Where(x => x.DoctorId == id));
-            if (req.Expertises.Count > 0)
-            {
-                _db.DoctorExpertises.AddRange(req.Expertises.Select((x, idx) => new DoctorExpertise
-                {
-                    DoctorId = id,
-                    Content = x.Content,
-                    SortOrder = x.SortOrder > 0 ? x.SortOrder : idx
-                }));
-            }
+            if (req.Expertises.Count > 0) _db.DoctorExpertises.AddRange(req.Expertises.Select((x, idx) => new DoctorExpertise { DoctorId = id, Content = x.Content, SortOrder = x.SortOrder > 0 ? x.SortOrder : idx }));
         }
-
         if (req.Achievements is not null)
         {
             _db.DoctorAchievements.RemoveRange(_db.DoctorAchievements.Where(a => a.DoctorId == id));
-            if (req.Achievements.Count > 0)
-            {
-                _db.DoctorAchievements.AddRange(req.Achievements.Select((a, idx) => new DoctorAchievement
-                {
-                    DoctorId = id,
-                    YearLabel = a.YearLabel,
-                    Content = a.Content,
-                    SortOrder = a.SortOrder > 0 ? a.SortOrder : idx
-                }));
-            }
+            if (req.Achievements.Count > 0) _db.DoctorAchievements.AddRange(req.Achievements.Select((a, idx) => new DoctorAchievement { DoctorId = id, YearLabel = a.YearLabel, Content = a.Content, SortOrder = a.SortOrder > 0 ? a.SortOrder : idx }));
         }
 
         doctor.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { success = true, message = "Cập nhật hồ sơ bác sĩ thành công." });
-    }
-
-    /* ================== UPLOAD ẢNH ĐẠI DIỆN (OVERRIDE) ================== */
-    [HttpPost("admin/{id:int}/upload-avatar")]
-    [Authorize(Roles = "ADMIN")]
-    [Produces("application/json")]
-    [SwaggerOperation(Summary = "Upload avatar bác sĩ", Description = "Lưu file vào wwwroot/uploads/doctors và set Doctor.AvatarUrl.", Tags = new[] { "Doctors" })]
-    public async Task<IActionResult> UploadDoctorAvatar([FromRoute] int id, IFormFile file, CancellationToken ct = default)
-    {
-        var doctor = await _db.Doctors.FirstOrDefaultAsync(d => d.DoctorId == id, ct);
-        if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
-
-        if (file == null || file.Length == 0) return BadRequest(new { success = false, message = "Vui lòng chọn file ảnh." });
-        if (file.Length > MaxFileSize) return BadRequest(new { success = false, message = "Kích thước file tối đa 5MB." });
-
-        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!AllowedExt.Contains(ext)) return BadRequest(new { success = false, message = "Chỉ chấp nhận: jpg, jpeg, png, gif, webp." });
-
-        var mime = file.ContentType.ToLowerInvariant();
-        if (!AllowedMime.Contains(mime)) return BadRequest(new { success = false, message = "Loại file không hợp lệ." });
-
-        var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "doctors");
-        if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
-
-        // Xoá ảnh override cũ nếu có
-        if (!string.IsNullOrWhiteSpace(doctor.AvatarUrl))
-        {
-            var oldName = Path.GetFileName(doctor.AvatarUrl);
-            var oldPath = Path.Combine(uploadDir, oldName);
-            if (System.IO.File.Exists(oldPath))
-            {
-                try { System.IO.File.Delete(oldPath); } catch { /* ignore */ }
-            }
-        }
-
-        var unique = $"doctor_{id}_{Guid.NewGuid():N}{ext}";
-        var path = Path.Combine(uploadDir, unique);
-
-        await using (var stream = new FileStream(path, FileMode.Create))
-        {
-            await file.CopyToAsync(stream, ct);
-        }
-
-        doctor.AvatarUrl = $"/uploads/doctors/{unique}";
-        doctor.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
-
-        // Trả về avatar đã resolve
-        var resolved = doctor.AvatarUrl ?? (await _db.Users
-            .Where(u => u.UserId == doctor.UserId)
-            .Select(u => u.Profile.AvatarUrl)
-            .FirstOrDefaultAsync(ct));
-
-        return Ok(new
-        {
-            success = true,
-            message = "Upload ảnh đại diện thành công.",
-            data = new { doctorId = id, avatarUrl = resolved }
-        });
     }
 
     /* ================== XÓA ẢNH OVERRIDE CỦA BÁC SĨ (TRỞ VỀ FALLBACK) ================== */
@@ -585,31 +486,26 @@ public class DoctorsController : ControllerBase
         if (doctor == null) return NotFound(new { success = false, message = "Không tìm thấy bác sĩ." });
 
         if (string.IsNullOrWhiteSpace(doctor.AvatarUrl))
-            return BadRequest(new { success = false, message = "Bác sĩ này không có ảnh override để xoá." });
+            return BadRequest(new { success = false, message = "Bác sĩ này đang dùng ảnh mặc định (hoặc không có ảnh override) nên không cần xóa." });
 
-        try
+        // Chỉ cần xóa link trong DB
+        doctor.AvatarUrl = null;
+        doctor.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        // Lấy lại ảnh fallback từ User Profile để trả về cho FE hiển thị ngay lập tức
+        var fallback = await _db.Users
+            .Where(u => u.UserId == doctor.UserId)
+            .Select(u => u.Profile.AvatarUrl)
+            .FirstOrDefaultAsync(ct);
+
+        return Ok(new
         {
-            var uploadDir = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "doctors");
-            var name = Path.GetFileName(doctor.AvatarUrl);
-            var filePath = Path.Combine(uploadDir, name);
-            if (System.IO.File.Exists(filePath))
-            {
-                try { System.IO.File.Delete(filePath); } catch { /* ignore */ }
-            }
-
-            doctor.AvatarUrl = null; // về fallback
-            doctor.UpdatedAt = DateTime.UtcNow;
-            await _db.SaveChangesAsync(ct);
-
-            var fallback = await _db.Users.Where(u => u.UserId == doctor.UserId)
-                .Select(u => u.Profile.AvatarUrl).FirstOrDefaultAsync(ct);
-
-            return Ok(new { success = true, message = "Đã xoá ảnh override. Đang dùng ảnh profile (fallback).", data = new { doctorId = id, avatarUrl = fallback } });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { success = false, message = "Lỗi khi xóa ảnh.", error = ex.Message });
-        }
+            success = true,
+            message = "Đã gỡ ảnh riêng của bác sĩ. Hệ thống sẽ hiển thị ảnh từ hồ sơ cá nhân (nếu có).",
+            data = new { doctorId = id, avatarUrl = fallback }
+        });
     }
 
     /* ================== VÔ HIỆU HÓA / KÍCH HOẠT ================== */
