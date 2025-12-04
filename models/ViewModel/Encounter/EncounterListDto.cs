@@ -5,6 +5,7 @@ public sealed class EncounterListItemDto
     public string DoctorName { get; init; } = string.Empty;
     public string ServiceName { get; init; } = string.Empty;
     public string Status { get; init; } = "draft";      // draft|finalized|cancelled
+    public decimal? TotalCost { get; init; }
 }
 
 public sealed class EncounterDetailDrugDto
@@ -27,6 +28,7 @@ public sealed class EncounterDetailDto
     public DateTime? ExpiryAt { get; init; }
     public string? ErxCode { get; init; }
     public string? ErxStatus { get; init; }
+    public decimal? TotalCost { get; init; }
 
     // Bác sĩ
     public string DoctorName { get; init; } = string.Empty;
@@ -39,6 +41,9 @@ public sealed class EncounterDetailDto
     public string? PatientCode { get; init; }
     public DateOnly? PatientDob { get; init; }
     public string? PatientGender { get; init; }
+    public string? PatientPhone { get; init; }
+    public string? PatientEmail { get; init; }
+    public string? PatientAddress { get; init; }
     public string? Diagnosis { get; init; }
     public string? Allergy { get; init; }
 

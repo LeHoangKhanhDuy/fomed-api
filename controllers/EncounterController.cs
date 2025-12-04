@@ -33,6 +33,18 @@ public class EncounterController : ControllerBase
 
     private bool IsStaff() => User.IsInRole("ADMIN") || User.IsInRole("DOCTOR");
 
+    private static string? BuildPatientAddress(Patient? patient)
+    {
+        if (patient == null)
+            return null;
+
+        var parts = new[] { patient.Address, patient.District, patient.City, patient.Province }
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
+
+        return parts.Count > 0 ? string.Join(", ", parts) : null;
+    }
+
     /* --------- Lịch sử khám bệnh (phân trang) --------- */
     [HttpGet]
     [SwaggerOperation(Summary = "Lịch sử khám bệnh theo bệnh nhân (phân trang)",
@@ -89,7 +101,15 @@ public class EncounterController : ControllerBase
 
                 HasAppt = e.Appointment != null,
                 ApptDate = e.Appointment != null ? (DateOnly?)e.Appointment.VisitDate : null,
-                ApptTime = e.Appointment != null ? (TimeOnly?)e.Appointment.VisitTime : null
+                ApptTime = e.Appointment != null ? (TimeOnly?)e.Appointment.VisitTime : null,
+
+                TotalCost = e.Appointment != null && e.Appointment.FinalCost.HasValue
+                    ? e.Appointment.FinalCost
+                    : _db.Invoices
+                        .Where(i => i.EncounterId == e.EncounterId)
+                        .OrderByDescending(i => i.CreatedAt)
+                        .Select(i => (decimal?)i.TotalAmount)
+                        .FirstOrDefault()
             })
             .ToListAsync(ct);
 
@@ -114,7 +134,8 @@ public class EncounterController : ControllerBase
                 VisitAt = finalVisitAt,
                 DoctorName = item.DoctorName,
                 ServiceName = item.ServiceName,
-                Status = item.Status ?? "draft"
+                Status = item.Status ?? "draft",
+                TotalCost = item.TotalCost
             };
         })
         .OrderByDescending(x => x.VisitAt)
@@ -238,6 +259,13 @@ public class EncounterController : ControllerBase
                 _logger.LogInformation("No prescriptions found for encounter {EncounterId}", encounterId);
             }
 
+            var invoiceTotal = await _db.Invoices
+                .AsNoTracking()
+                .Where(i => i.EncounterId == encounter.EncounterId)
+                .OrderByDescending(i => i.CreatedAt)
+                .Select(i => (decimal?)i.TotalAmount)
+                .FirstOrDefaultAsync(ct);
+
             // Build response DTO
             var dto = new EncounterDetailDto
             {
@@ -271,8 +299,12 @@ public class EncounterController : ControllerBase
                 PatientGender = encounter.Patient?.Gender == "M"
                     ? "Nam"
                     : (encounter.Patient?.Gender == "F" ? "Nữ" : null),
+                PatientPhone = encounter.Patient?.Phone,
+                PatientEmail = encounter.Patient?.Email,
+                PatientAddress = BuildPatientAddress(encounter.Patient),
                 Diagnosis = encounter.DiagnosisText,
                 Allergy = encounter.Patient?.AllergyText,
+                TotalCost = invoiceTotal ?? encounter.Appointment?.FinalCost,
 
                 // Prescription details
                 Advice = latestPrescription?.Advice,
