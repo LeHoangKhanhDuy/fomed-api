@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Security.Claims;
 using FoMed.Api.Models;
@@ -14,6 +16,23 @@ public sealed class AppointmentsController : ControllerBase
 {
     private readonly FoMedContext _db;
     public AppointmentsController(FoMedContext db) => _db = db;
+
+    private static readonly HashSet<string> AppointmentStatusSet = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "waiting",
+        "booked",
+        "done",
+        "cancelled",
+        "no_show"
+    };
+
+    private static readonly HashSet<string> EmployeeMutableStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "waiting",
+        "cancelled"
+    };
+
+    public sealed record UpdateAppointmentStatusRequest(string Status);
 
     // POST: tạo lịch (PATIENT / EMPLOYEE / ADMIN)
     [HttpPost("create")]
@@ -114,6 +133,7 @@ public sealed class AppointmentsController : ControllerBase
                 var code = $"BN{nextNumber:D4}";
                 var nowUtc = DateTime.UtcNow;
 
+                var initialStatus = User.IsInRole("PATIENT") ? "booked" : "waiting";
                 var entity = new Appointment
                 {
                     PatientId = req.PatientId,
@@ -122,7 +142,7 @@ public sealed class AppointmentsController : ControllerBase
                     VisitDate = req.VisitDate,
                     VisitTime = req.VisitTime,
                     Reason = string.IsNullOrWhiteSpace(req.Reason) ? null : req.Reason!.Trim(),
-                    Status = "waiting",
+                    Status = initialStatus,
                     QueueNo = nextQueue,
                     Code = code,
                     CreatedAt = nowUtc,
@@ -173,6 +193,48 @@ public sealed class AppointmentsController : ControllerBase
         });
     }
 
+    [HttpPatch("{appointmentId}/status")]
+    [Authorize(Roles = "EMPLOYEE,ADMIN")]
+    [SwaggerOperation(Summary = "Cập nhật trạng thái lịch", Description = "Employee có thể bật 'Đã đến' hoặc huỷ lịch.", Tags = new[] { "Appointments" })]
+    public async Task<IActionResult> UpdateStatus(
+        [FromRoute] long appointmentId,
+        [FromBody] UpdateAppointmentStatusRequest req,
+        CancellationToken ct = default)
+    {
+        if (appointmentId <= 0)
+            return BadRequest(new { success = false, message = "AppointmentId không hợp lệ." });
+
+        if (string.IsNullOrWhiteSpace(req.Status))
+            return BadRequest(new { success = false, message = "Status bắt buộc." });
+
+        var normalized = req.Status.Trim();
+        if (!AppointmentStatusSet.Contains(normalized) || !EmployeeMutableStatuses.Contains(normalized))
+        {
+            return BadRequest(new { success = false, message = "Status không hợp lệ hoặc không được phép." });
+        }
+
+        var appt = await _db.Appointments.FindAsync(new object[] { appointmentId }, ct);
+        if (appt == null)
+            return NotFound(new { success = false, message = "Không tìm thấy lịch hẹn." });
+
+        if (appt.Status == normalized)
+            return Ok(new { success = true, message = "Trạng thái không thay đổi.", data = new { appt.AppointmentId, status = appt.Status } });
+
+        if (appt.Status is "done" or "cancelled" or "no_show")
+            return BadRequest(new { success = false, message = "Không thể cập nhật lịch đã hoàn tất hoặc huỷ." });
+
+        appt.Status = normalized;
+        appt.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Đã cập nhật trạng thái.",
+            data = new { appt.AppointmentId, status = appt.Status }
+        });
+    }
+
     // GET: danh sách lịch theo ngày/bác sĩ (phục vụ UI)
     [HttpGet]
     [Authorize(Roles = "DOCTOR,EMPLOYEE,ADMIN")]
@@ -187,6 +249,7 @@ public sealed class AppointmentsController : ControllerBase
         [FromQuery] DateOnly? date,
         [FromQuery] int? doctorId,
         [FromQuery] string? q,
+        [FromQuery] string? status,
         [FromQuery] int page = 1,
         [FromQuery] int limit = 20,
         CancellationToken ct = default)
@@ -206,6 +269,17 @@ public sealed class AppointmentsController : ControllerBase
         var query = _db.Appointments
             .AsNoTracking()
             .Where(a => a.VisitDate == theDate);
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var normalizedStatus = status.Trim().ToLowerInvariant();
+            if (!AppointmentStatusSet.Contains(normalizedStatus))
+            {
+                return BadRequest(new { success = false, message = "Status không hợp lệ." });
+            }
+
+            query = query.Where(a => a.Status == normalizedStatus);
+        }
 
         if (doctorId.HasValue)
             query = query.Where(a => a.DoctorId == doctorId.Value);
