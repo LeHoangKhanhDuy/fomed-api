@@ -1,8 +1,10 @@
 using FoMed.Api.Features.Doctor.TodayPatients;
 using FoMed.Api.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 
 [ApiController]
@@ -18,7 +20,13 @@ public class DashboardController : ControllerBase
 
     //Thống kê tổng số lượt khám (Appointments.Status = done, có VisitAt)
     [HttpGet("visits")]
+    [SwaggerOperation(
+        Summary = "Tổng lượt khám bệnh",
+        Description = "Trả về tổng lượt khám hoàn tất theo khoảng thời gian, hỗ trợ lọc bác sĩ/dịch vụ.",
+        Tags = new[] { "Dashboard" })]
     [Produces("application/json")]
+    [ProducesResponseType(typeof(VisitTotalResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> GetVisitTotals(
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
@@ -87,7 +95,13 @@ public class DashboardController : ControllerBase
     }
 
     [HttpGet("doctors")]
+    [SwaggerOperation(
+        Summary = "Tổng số bác sĩ hoạt động",
+        Description = "Tổng số bác sĩ theo trạng thái hoạt động và chuyên khoa chính khi cần lọc.",
+        Tags = new[] { "Dashboard" })]
     [Produces("application/json")]
+    [ProducesResponseType(typeof(DoctorTotalResponse), StatusCodes.Status200OK)]
+
     public async Task<IActionResult> GetDoctorTotals(
     [FromQuery] int? specialtyId,
     [FromQuery] bool? isActive,
@@ -128,7 +142,13 @@ public class DashboardController : ControllerBase
     }
 
     [HttpGet("patients")]
+    [SwaggerOperation(
+        Summary = "Tổng số bệnh nhân mới trong tháng",
+        Description = "Thống kê bệnh nhân mới theo khoảng ngày cùng các mốc Today/Week/Month.",
+        Tags = new[] { "Dashboard" })]
     [Produces("application/json")]
+    [ProducesResponseType(typeof(PatientTotalResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetPatientTotals(
     [FromQuery] DateOnly? from,
     [FromQuery] DateOnly? to,
@@ -185,7 +205,12 @@ public class DashboardController : ControllerBase
 
     // Thống kê doanh thu theo tháng (từ Appointments hoàn thành)
     [HttpGet("monthly-sales")]
+    [SwaggerOperation(
+        Summary = "Doanh thu theo tháng",
+        Description = "Doanh thu theo tháng trong năm, có thể lọc theo bác sĩ/dịch vụ.",
+        Tags = new[] { "Dashboard" })]
     [Produces("application/json")]
+    [ProducesResponseType(typeof(MonthlySalesResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult> GetMonthlySales(
         [FromQuery] int? year,
         [FromQuery] int? doctorId,
@@ -269,7 +294,12 @@ public class DashboardController : ControllerBase
 
     // Mục tiêu doanh thu theo tháng (100 tr)
     [HttpGet("monthly-target")]
+    [SwaggerOperation(
+        Summary = "Mục theo từng tháng",
+        Description = "So sánh doanh thu thực tế với mục tiêu tháng định trước.",
+        Tags = new[] { "Dashboard" })]
     [Produces("application/json")]
+    [ProducesResponseType(typeof(MonthlyTargetResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult> GetMonthlyTarget(
         [FromQuery] int? year,
         [FromQuery] int? month,
@@ -311,5 +341,86 @@ public class DashboardController : ControllerBase
         );
 
         return Ok(res);
+    }
+
+    public sealed record PharmacyStatResponse(
+    bool Success,
+    int TotalActiveMedicines,    // Tổng số loại thuốc đang kinh doanh
+    decimal TotalStockValue,     // Tổng giá trị tồn kho (Quantity * PurchasePrice)
+    int LowStockItemsCount,      // Số loại thuốc sắp hết
+    int ExpiringSoonCount,       // Số lô sắp hết hạn
+    List<LowStockDto> LowStockItems,
+    List<ExpiringLotDto> ExpiringLots);
+
+    public sealed record LowStockDto(int MedicineId, string Name, decimal TotalQuantity, string Unit);
+    public sealed record ExpiringLotDto(long LotId, string MedicineName, string? LotNumber, decimal Quantity, string ExpiryDate);
+
+    [HttpGet("pharmacy-summary")]
+    [SwaggerOperation(
+        Summary = "Tóm tắt kho dược phẩm",
+        Description = "Tóm tắt tồn kho và cảnh báo số lượng/hạn dùng của dược phẩm.",
+        Tags = new[] { "Dashboard" })]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(PharmacyStatResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPharmacySummary(
+        [FromQuery] int expiryDays = 30,
+        [FromQuery] decimal lowStockThreshold = 20, // Ngưỡng báo động chung
+        CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var expiryLimit = now.AddDays(expiryDays);
+
+        var totalActiveMedicines = await _db.Medicines
+            .AsNoTracking()
+            .Where(m => m.IsActive)
+            .CountAsync(ct);
+
+        var totalStockValue = await _db.MedicineLots
+            .AsNoTracking()
+            .Where(l => l.Medicine.IsActive)
+            .SumAsync(l => l.Quantity * (l.PurchasePrice ?? 0), ct);
+
+        var lowStockItems = await _db.Medicines
+            .AsNoTracking()
+            .Where(m => m.IsActive)
+            .Select(m => new
+            {
+                m.MedicineId,
+                m.Name,
+                m.Unit,
+                TotalQty = m.Lots.Sum(l => (decimal?)l.Quantity) ?? 0
+            })
+            .Where(x => x.TotalQty <= lowStockThreshold)
+            .OrderBy(x => x.TotalQty)
+            .Select(x => new LowStockDto(x.MedicineId, x.Name, x.TotalQty, x.Unit))
+            .ToListAsync(ct);
+
+        var expiringLots = await _db.MedicineLots
+            .AsNoTracking()
+            .Where(l => l.ExpiryDate.HasValue
+                     && l.ExpiryDate <= expiryLimit
+                     && l.ExpiryDate >= now
+                     && l.Quantity > 0)
+            .OrderBy(l => l.ExpiryDate)
+            .Select(l => new ExpiringLotDto(
+                l.LotId,
+                l.Medicine.Name,
+                l.LotNumber,
+                l.Quantity,
+                l.ExpiryDate!.Value.ToString("dd/MM/yyyy")
+            ))
+            .ToListAsync(ct);
+
+        var response = new PharmacyStatResponse(
+            Success: true,
+            TotalActiveMedicines: totalActiveMedicines,
+            TotalStockValue: totalStockValue,
+            LowStockItemsCount: lowStockItems.Count,
+            ExpiringSoonCount: expiringLots.Count,
+            LowStockItems: lowStockItems,
+            ExpiringLots: expiringLots
+        );
+
+        return Ok(response);
     }
 }
