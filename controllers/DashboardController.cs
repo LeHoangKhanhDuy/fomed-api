@@ -364,7 +364,7 @@ public class DashboardController : ControllerBase
     [ProducesResponseType(typeof(PharmacyStatResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPharmacySummary(
         [FromQuery] int expiryDays = 30,
-        [FromQuery] decimal lowStockThreshold = 20, // Ngưỡng báo động chung
+        [FromQuery] decimal lowStockThreshold = 50, // Ngưỡng báo động chung
         CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
