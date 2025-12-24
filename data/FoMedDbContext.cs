@@ -10,6 +10,7 @@ public class FoMedContext : DbContext
     // ===== Catalogs / Services =====
     public DbSet<Service> Services => Set<Service>();
     public DbSet<ServiceCategory> ServiceCategories => Set<ServiceCategory>();
+    public DbSet<ServiceLabTest> ServiceLabTests => Set<ServiceLabTest>();
 
     // ===== Pharmacy =====
     public DbSet<Medicine> Medicines => Set<Medicine>();
@@ -85,8 +86,32 @@ public class FoMedContext : DbContext
         m.Entity<ServiceCategory>(e =>
         {
             e.Property(c => c.ImageUrl).HasMaxLength(300);
+            e.Property(c => c.CategoryType).HasColumnType("varchar(20)").HasDefaultValue("visit");
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_ServiceCategories_Type", "CategoryType IN ('visit','lab','vaccine')");
+            });
             e.HasIndex(c => c.Name).IsUnique();
             e.HasIndex(c => c.Code).IsUnique().HasFilter("[Code] IS NOT NULL");
+        });
+
+        m.Entity<ServiceLabTest>(e =>
+        {
+            e.ToTable("ServiceLabTests");
+            e.HasKey(x => new { x.ServiceId, x.LabTestId });
+            e.Property(x => x.DisplayOrder).HasDefaultValue(0);
+            e.HasIndex(x => new { x.ServiceId, x.DisplayOrder, x.LabTestId })
+             .HasDatabaseName("IX_ServiceLabTests_Order");
+
+            e.HasOne(x => x.Service)
+             .WithMany(s => s.ServiceLabTests)
+             .HasForeignKey(x => x.ServiceId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.LabTest)
+             .WithMany()
+             .HasForeignKey(x => x.LabTestId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---------- Pharmacy ----------

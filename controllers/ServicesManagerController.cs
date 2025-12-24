@@ -46,7 +46,7 @@ public class ServiceCateController : ControllerBase
                 s.ImageUrl,
                 Category = s.Category == null
                     ? null
-                    : new { s.Category.CategoryId, s.Category.Name, s.Category.ImageUrl }
+                    : new { s.Category.CategoryId, s.Category.Name, s.Category.CategoryType, s.Category.ImageUrl }
             })
             .ToListAsync();
 
@@ -83,7 +83,7 @@ public class ServiceCateController : ControllerBase
                 s.ImageUrl,
                 Category = s.Category == null
                 ? null
-                : new { s.Category.CategoryId, s.Category.Name, s.Category.ImageUrl }
+                : new { s.Category.CategoryId, s.Category.Name, s.Category.CategoryType, s.Category.ImageUrl }
             }).FirstOrDefaultAsync();
         if (service == null)
             return NotFound(new { success = false, message = "Không tìm thấy dịch vụ." });

@@ -131,6 +131,7 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
         var appt = await _db.Appointments
             .Include(a => a.Patient)
+            .Include(a => a.Service).ThenInclude(s => s!.Category)
             .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
 
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
@@ -138,6 +139,14 @@ public sealed class DoctorWorkspaceController : ControllerBase
 
         if (appt.Status is "cancelled" or "no_show" or "done")
             return Bad("Trạng thái lịch hẹn hiện tại không thể bắt đầu khám.");
+
+        // Chỉ cho phép bắt đầu khám với dịch vụ loại visit
+        var apptType = appt.Service?.Category?.CategoryType;
+        if (!string.IsNullOrWhiteSpace(apptType)
+            && !string.Equals(apptType, "visit", StringComparison.OrdinalIgnoreCase))
+        {
+            return Bad($"Lịch hẹn này thuộc loại '{apptType}', không phải khám bệnh (visit).");
+        }
 
         // Có thể cập nhật trạng thái ở đây nếu cần (ví dụ: "in_progress")
         // appt.Status = "in_progress";
@@ -160,10 +169,18 @@ public sealed class DoctorWorkspaceController : ControllerBase
         if (err != null) return ForbidApi(err);
 
         var appt = await _db.Appointments
+            .Include(a => a.Service).ThenInclude(s => s!.Category)
             .FirstOrDefaultAsync(a => a.AppointmentId == req.AppointmentId);
 
         if (appt == null) return NotFoundApi("Không tìm thấy lịch hẹn.");
         if (appt.DoctorId != doctorId) return ForbidApi("Bạn không có quyền thao tác lịch hẹn này.");
+
+        var apptType = appt.Service?.Category?.CategoryType;
+        if (!string.IsNullOrWhiteSpace(apptType)
+            && !string.Equals(apptType, "visit", StringComparison.OrdinalIgnoreCase))
+        {
+            return Bad($"Lịch hẹn này thuộc loại '{apptType}', không phải khám bệnh (visit).");
+        }
 
         // Tạo hoặc cập nhật Encounter
         var enc = await _db.Encounters
