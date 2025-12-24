@@ -173,6 +173,28 @@ builder.Services.AddHostedService<AppointmentCleanupService>();
 // ================== BUILD & PIPELINE ==================
 var app = builder.Build();
 
+// Always apply pending EF Core migrations on startup.
+// If there are no pending migrations, this is a fast no-op.
+{
+    using var scope = app.Services.CreateScope();
+    var logger = scope.ServiceProvider
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("EfCoreMigrations");
+
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<FoMedContext>();
+        logger.LogInformation("Applying EF Core migrations...");
+        db.Database.Migrate();
+        logger.LogInformation("EF Core migrations applied successfully.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to apply EF Core migrations.");
+        throw;
+    }
+}
+
 // Forwarded headers 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
