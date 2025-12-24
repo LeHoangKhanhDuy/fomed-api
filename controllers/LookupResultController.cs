@@ -55,18 +55,42 @@ public sealed class LookupResultController : ControllerBase
 
     // ============ 1) Tra cứu theo MÃ HỒ SƠ ============
     [HttpPost("by-code")]
-    [SwaggerOperation(Summary = "Tra cứu chi tiết hồ sơ theo mã", Description = "Nhập HSFM-xxxxxx, trả chi tiết hồ sơ.")]
+    [SwaggerOperation(Summary = "Tra cứu chi tiết hồ sơ theo mã", Description = "Nhập HSFM-xxxxxx (có/không zero padding) hoặc nhập EncounterId, trả chi tiết hồ sơ.")]
     public async Task<IActionResult> LookupEncounterByCode([FromBody] LookupByCodeRequest req, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(req.Code))
             return BadRequest(new { success = false, message = "Vui lòng nhập mã hồ sơ." });
 
+        var raw = req.Code.Trim();
+        var codeLower = raw.ToLowerInvariant();
+
+        // Hỗ trợ nhập trực tiếp EncounterId ("22") hoặc dạng HSFM-<id> ("HSFM-22", "HSFM-000022").
+        long? encounterIdFromInput = null;
+        if (long.TryParse(raw, out var parsedId))
+        {
+            encounterIdFromInput = parsedId;
+        }
+        else if (raw.StartsWith("HSFM-", StringComparison.OrdinalIgnoreCase))
+        {
+            var suffix = raw[5..].Trim();
+            if (long.TryParse(suffix, out var parsedSuffixId))
+                encounterIdFromInput = parsedSuffixId;
+        }
+
         var dto = await _db.Encounters
             .AsNoTracking()
-            .Where(e => e.Code == req.Code.Trim())
+            // Hỗ trợ cả mã thật (Encounter.Code) và các dạng mã hiển thị/nhập liệu phổ biến.
+            .Where(e =>
+                // 1) Match theo EncounterId (từ "22" hoặc "HSFM-000022")
+                (encounterIdFromInput != null && e.EncounterId == encounterIdFromInput.Value)
+                // 2) Match theo code lưu trong DB (không phân biệt hoa/thường)
+                || (e.Code != null && e.Code.ToLower() == codeLower)
+                // 3) Match theo code hiển thị fallback ("HSFM-" + EncounterId)
+                || (("HSFM-" + e.EncounterId) == raw)
+            )
             .Select(e => new
             {
-                EncounterCode = e.Code!,
+                EncounterCode = e.Code ?? ("HSFM-" + e.EncounterId),
                 VisitAt = e.CreatedAt,
                 DoctorName = e.Doctor.User!.FullName,
                 ServiceName = e.Service != null ? e.Service.Name : null,
