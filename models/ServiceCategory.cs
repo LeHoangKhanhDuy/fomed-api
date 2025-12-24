@@ -13,6 +13,10 @@ namespace FoMed.Api.Models
 
         [Required, StringLength(100)]
         public string Name { get; set; } = "";
+
+        // visit | lab | vaccine
+        [Required, StringLength(20)]
+        public string CategoryType { get; set; } = "visit";
         public string? ImageUrl { get; set; }
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

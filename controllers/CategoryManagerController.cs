@@ -33,7 +33,9 @@ public class AdminServiceCategoriesController : ControllerBase
                                c.CategoryId,
                                c.Code,
                                c.Name,
+                               c.CategoryType,
                                c.IsActive,
+                               c.ImageUrl,
                                c.CreatedAt,
                                c.UpdatedAt
                            }).ToListAsync();
@@ -47,7 +49,7 @@ public class AdminServiceCategoriesController : ControllerBase
     {
         var c = await _db.ServiceCategories.AsNoTracking()
                     .Where(x => x.CategoryId == id)
-                    .Select(x => new { x.CategoryId, x.Code, x.Name, x.IsActive, x.CreatedAt, x.UpdatedAt })
+                    .Select(x => new { x.CategoryId, x.Code, x.Name, x.CategoryType, x.IsActive, x.ImageUrl, x.CreatedAt, x.UpdatedAt })
                     .FirstOrDefaultAsync();
         if (c == null) return NotFound(new { success = false, message = "Không tìm thấy danh mục." });
         return Ok(new { success = true, message = "OK", data = c });
@@ -71,6 +73,8 @@ public class AdminServiceCategoriesController : ControllerBase
         {
             Code = string.IsNullOrWhiteSpace(req.Code) ? null : req.Code.Trim(),
             Name = req.Name.Trim(),
+            CategoryType = string.IsNullOrWhiteSpace(req.CategoryType) ? "visit" : req.CategoryType.Trim().ToLowerInvariant(),
+            ImageUrl = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl.Trim(),
             IsActive = req.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -102,6 +106,8 @@ public class AdminServiceCategoriesController : ControllerBase
         if (nameExists) return BadRequest(new { success = false, message = "Tên danh mục đã tồn tại." });
 
         c.Name = req.Name.Trim();
+        c.CategoryType = string.IsNullOrWhiteSpace(req.CategoryType) ? "visit" : req.CategoryType.Trim().ToLowerInvariant();
+        c.ImageUrl = string.IsNullOrWhiteSpace(req.ImageUrl) ? null : req.ImageUrl.Trim();
         c.IsActive = req.IsActive;
         c.UpdatedAt = DateTime.UtcNow;
 

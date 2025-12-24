@@ -1237,6 +1237,13 @@ namespace FoMed_WebAPI.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("CategoryId"));
 
+                    b.Property<string>("CategoryType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("visit");
+
                     b.Property<string>("Code")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -1268,7 +1275,33 @@ namespace FoMed_WebAPI.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("ServiceCategories");
+                    b.ToTable("ServiceCategories", t =>
+                        {
+                            t.HasCheckConstraint("CK_ServiceCategories_Type", "CategoryType IN ('visit','lab','vaccine')");
+                        });
+                });
+
+            modelBuilder.Entity("FoMed.Api.Models.ServiceLabTest", b =>
+                {
+                    b.Property<int>("ServiceId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LabTestId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("ServiceId", "LabTestId");
+
+                    b.HasIndex("LabTestId");
+
+                    b.HasIndex("ServiceId", "DisplayOrder", "LabTestId")
+                        .HasDatabaseName("IX_ServiceLabTests_Order");
+
+                    b.ToTable("ServiceLabTests", (string)null);
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.Specialty", b =>
@@ -2063,6 +2096,25 @@ namespace FoMed_WebAPI.Migrations
                     b.Navigation("Category");
                 });
 
+            modelBuilder.Entity("FoMed.Api.Models.ServiceLabTest", b =>
+                {
+                    b.HasOne("FoMed.Api.Models.LabTest", "LabTest")
+                        .WithMany()
+                        .HasForeignKey("LabTestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FoMed.Api.Models.Service", "Service")
+                        .WithMany("ServiceLabTests")
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabTest");
+
+                    b.Navigation("Service");
+                });
+
             modelBuilder.Entity("FoMed.Api.Models.UserExternalLogin", b =>
                 {
                     b.HasOne("FoMed.Api.Models.User", "User")
@@ -2265,6 +2317,11 @@ namespace FoMed_WebAPI.Migrations
             modelBuilder.Entity("FoMed.Api.Models.Role", b =>
                 {
                     b.Navigation("UserRoles");
+                });
+
+            modelBuilder.Entity("FoMed.Api.Models.Service", b =>
+                {
+                    b.Navigation("ServiceLabTests");
                 });
 
             modelBuilder.Entity("FoMed.Api.Models.ServiceCategory", b =>

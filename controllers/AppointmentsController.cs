@@ -66,14 +66,31 @@ public sealed class AppointmentsController : ControllerBase
 
         // Load thông tin dịch vụ (nếu có)
         string? serviceName = null;
+        string? serviceCategoryType = null;
         if (req.ServiceId.HasValue)
         {
-            serviceName = await _db.Services
+            var serviceInfo = await _db.Services
+                .AsNoTracking()
                 .Where(s => s.ServiceId == req.ServiceId.Value)
-                .Select(s => s.Name)
+                .Select(s => new
+                {
+                    s.Name,
+                    CategoryType = s.Category != null ? s.Category.CategoryType : null
+                })
                 .FirstOrDefaultAsync(ct);
-            if (serviceName == null)
+
+            if (serviceInfo == null)
                 return BadRequest(new { success = false, message = "Dịch vụ không tồn tại." });
+
+            if (string.IsNullOrWhiteSpace(serviceInfo.CategoryType))
+                return BadRequest(new { success = false, message = "Dịch vụ chưa được phân loại (CategoryType)." });
+
+            // Lịch hẹn của bác sĩ hiện dùng cho khám bệnh -> chỉ nhận visit
+            if (!string.Equals(serviceInfo.CategoryType, "visit", StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { success = false, message = "Dịch vụ này không phải dịch vụ khám bệnh (visit)." });
+
+            serviceName = serviceInfo.Name;
+            serviceCategoryType = serviceInfo.CategoryType;
         }
 
         // PATIENT chỉ được đặt cho chính mình
@@ -178,7 +195,8 @@ public sealed class AppointmentsController : ControllerBase
 
                     // Dịch vụ
                     ServiceId = entity.ServiceId,
-                    ServiceName = serviceName
+                    ServiceName = serviceName,
+                    ServiceCategoryType = serviceCategoryType
                 };
 
                 result = Ok(new { success = true, message = "Tạo lịch thành công", data = resp });
