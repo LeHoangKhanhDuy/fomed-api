@@ -14,6 +14,7 @@ using FoMed.Api.Auth;
 using FoMed.Api.ViewModels.Accounts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using FoMed.Api.Services;
 
 
 [ApiController]
@@ -23,12 +24,18 @@ public class AccountsController : ControllerBase
     private readonly FoMedContext _db;
     private readonly IConfiguration _cfg;
     private readonly ILogger<AccountsController> _logger;
+    private readonly ITokenBlacklistService _blacklistService;
 
-    public AccountsController(FoMedContext db, IConfiguration cfg, ILogger<AccountsController> logger)
+    public AccountsController(
+        FoMedContext db,
+        IConfiguration cfg,
+        ILogger<AccountsController> logger,
+        ITokenBlacklistService blacklistService)
     {
         _db = db;
         _cfg = cfg;
         _logger = logger;
+        _blacklistService = blacklistService;
     }
 
     // ===== Helpers =====
@@ -492,13 +499,53 @@ public class AccountsController : ControllerBase
 
     public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
     {
+        // 1. Tìm session theo refresh token
         var session = await _db.UserSessions
             .FirstOrDefaultAsync(s => s.RefreshToken == request.RefreshToken);
 
+        // 2. Kiểm tra session hợp lệ (tồn tại + chưa bị hủy + chưa hết hạn)
         if (session is null || session.RevokedAt != null || session.ExpiresAt <= DateTime.UtcNow)
             return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ hoặc đã hết hạn.", 401));
 
+        // (Optional) Nếu request có access token hợp lệ và có userId claim thì check ownership.
+        // Nếu không có/không parse được claim, vẫn cho phép revoke refresh token (possession-based logout).
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrWhiteSpace(userIdStr) && long.TryParse(userIdStr, out var userIdFromToken))
+        {
+            if (session.UserId != userIdFromToken)
+                return Unauthorized(ApiResponse<object>.Fail("Phiên đăng nhập không hợp lệ.", 401));
+        }
+
+        // 3. Hủy refresh token trong DB
         session.RevokedAt = DateTime.UtcNow;
+
+        // 4. Blacklist access token hiện tại (nếu có)
+        var authHeader = Request.Headers.Authorization.ToString();
+        if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            var accessToken = authHeader.Substring("Bearer ".Length).Trim();
+
+            // Không phụ thuộc claim 'exp' (thường không có trong ClaimsPrincipal).
+            // Parse trực tiếp JWT để lấy thời gian hết hạn.
+            try
+            {
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
+                var expDateUtc = jwt.ValidTo; // UTC
+                var timeRemaining = expDateUtc - DateTime.UtcNow;
+
+                // Thêm một khoảng thời gian đệm (Buffer time) khoảng 30s 
+                // để đảm bảo clock skew giữa các server không gây lọt token
+                if (timeRemaining > TimeSpan.Zero)
+                {
+                    await _blacklistService.RevokeTokenAsync(accessToken, timeRemaining.Add(TimeSpan.FromSeconds(30)));
+                }
+            }
+            catch
+            {
+                // Ignore malformed token; refresh token already revoked.
+            }
+        }
+
         await _db.SaveChangesAsync();
 
         return Ok(ApiResponse<object>.Success(new { }, "Đăng xuất thành công"));

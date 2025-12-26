@@ -11,6 +11,8 @@ using System.Text;
 using Microsoft.OpenApi.Any;
 using Microsoft.Extensions.FileProviders;
 using FoMed.Api.Features.Appointments;
+using FoMed.Api.Services;
+using FoMed.Api.Cors;
 
 // ================== 1) CONFIG ==================
 var builder = WebApplication.CreateBuilder(args);
@@ -167,6 +169,10 @@ builder.Services.Configure<ApiBehaviorOptions>(opt =>
 // DI cho token service
 builder.Services.AddScoped<ITokenService, TokenService>();
 
+// Token blacklist (logout) using IDistributedCache
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddScoped<ITokenBlacklistService, TokenBlacklistService>();
+
 // Đăng ký dịch vụ chạy nền
 builder.Services.AddHostedService<AppointmentCleanupService>();
 
@@ -252,6 +258,9 @@ app.UseRouting();
 
 // CORS mặc định: PublicApi
 app.UseCors(PublicApi);
+
+// Block revoked JWTs early
+app.UseMiddleware<JwtBlacklistMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
